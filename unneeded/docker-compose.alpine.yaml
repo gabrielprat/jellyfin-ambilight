@@ -1,0 +1,74 @@
+version: '3.8'
+
+# MINIMAL ALPINE-BASED DEPLOYMENT
+# ~100MB vs 2GB+ with Debian!
+
+services:
+  jellyfin-ambilight:
+    build:
+      context: .
+      dockerfile: Dockerfile.alpine
+    container_name: jellyfin-ambilight-alpine
+    hostname: jellyfin-ambilight-alpine
+    restart: unless-stopped
+
+    # Use host networking (simpler, no DNS issues)
+    network_mode: host
+
+    environment:
+      # Essential config only
+      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY}
+      - JELLYFIN_BASE_URL=${JELLYFIN_BASE_URL}
+      - WLED_HOST=${WLED_HOST:-wled-ambilight-lgc1.lan}
+      - WLED_UDP_PORT=${WLED_UDP_PORT:-21324}
+
+      # LED config
+      - AMBILIGHT_TOP_LED_COUNT=${AMBILIGHT_TOP_LED_COUNT:-89}
+      - AMBILIGHT_BOTTOM_LED_COUNT=${AMBILIGHT_BOTTOM_LED_COUNT:-89}
+      - AMBILIGHT_LEFT_LED_COUNT=${AMBILIGHT_LEFT_LED_COUNT:-49}
+      - AMBILIGHT_RIGHT_LED_COUNT=${AMBILIGHT_RIGHT_LED_COUNT:-49}
+      - AMBILIGHT_INPUT_POSITION=${AMBILIGHT_INPUT_POSITION:-46}
+
+      # Frame extraction
+      - FRAMES_PER_SECOND=${FRAMES_PER_SECOND:-10}
+      - EXTRACTION_PRIORITY=${EXTRACTION_PRIORITY:-newest_first}
+      - EXTRACTION_BATCH_SIZE=${EXTRACTION_BATCH_SIZE:-5}
+
+      # Timing
+      - LIBRARY_SCAN_INTERVAL=${LIBRARY_SCAN_INTERVAL:-3600}
+      - PLAYBACK_MONITOR_INTERVAL=${PLAYBACK_MONITOR_INTERVAL:-1.0}
+
+      # Storage
+      - AMBILIGHT_DATA_DIR=/app/data/ambilight
+
+    volumes:
+      # Source code (for development)
+      - ./:/app/src:ro
+
+      # Data persistence
+      - ${DATA_PATH:-./data}:/app/data
+
+      # Media access (read-only)
+      - ${MOVIES_PATH:-/path/to/movies}:/media/movies:ro
+      - ${TV_PATH:-/path/to/tv}:/media/tv:ro
+
+    # Much lower resource requirements!
+    deploy:
+      resources:
+        limits:
+          memory: 512M  # vs 2GB+
+          cpus: '0.5'   # vs 1.0+
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+
+    # Simple logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    labels:
+      - "com.jellyfin.ambilight.type=alpine-minimal"
+      - "com.jellyfin.ambilight.size=~100MB"

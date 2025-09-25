@@ -1,0 +1,93 @@
+version: '3.8'
+
+# Alternative Docker Compose with Host Networking
+# Use this if you have DNS resolution issues with bridge networking
+
+services:
+  jellyfin-ambilight:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: jellyfin-ambilight
+    hostname: jellyfin-ambilight
+    restart: unless-stopped
+
+    # HOST NETWORKING - uses host's network stack
+    network_mode: host
+
+    environment:
+      # Jellyfin Configuration (REQUIRED)
+      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:-9b53498f4e1b4325a420fd705fea0020}
+      - JELLYFIN_BASE_URL=${JELLYFIN_BASE_URL:-https://jellyfin.galagaon.com}
+
+      # Storage Configuration
+      - AMBILIGHT_DATA_DIR=/app/data/ambilight
+
+      # Frame Extraction Settings (used by fast_extractor.py)
+      - FRAMES_PER_SECOND=${FRAMES_PER_SECOND:-10}
+      - EXTRACTION_PRIORITY=${EXTRACTION_PRIORITY:-newest_first}
+      - EXTRACTION_BATCH_SIZE=${EXTRACTION_BATCH_SIZE:-5}
+
+      # LED Configuration (Hyperion.ng compatible)
+      - AMBILIGHT_TOP_LED_COUNT=${AMBILIGHT_TOP_LED_COUNT:-89}
+      - AMBILIGHT_BOTTOM_LED_COUNT=${AMBILIGHT_BOTTOM_LED_COUNT:-89}
+      - AMBILIGHT_LEFT_LED_COUNT=${AMBILIGHT_LEFT_LED_COUNT:-49}
+      - AMBILIGHT_RIGHT_LED_COUNT=${AMBILIGHT_RIGHT_LED_COUNT:-49}
+      - AMBILIGHT_INPUT_POSITION=${AMBILIGHT_INPUT_POSITION:-46}
+
+      # WLED Configuration
+      - WLED_HOST=${WLED_HOST:-wled-ambilight-lgc1.lan}
+      - WLED_UDP_PORT=${WLED_UDP_PORT:-21324}
+
+      # Service Intervals (used by ambilight-daemon-files.py)
+      - LIBRARY_SCAN_INTERVAL=${LIBRARY_SCAN_INTERVAL:-3600}        # 1 hour - scan for new videos
+      - PLAYBACK_MONITOR_INTERVAL=${PLAYBACK_MONITOR_INTERVAL:-1.0}  # 1 second - HTTP polling
+
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - PYTHONUNBUFFERED=1
+
+    volumes:
+      # SOURCE CODE MOUNT (for development - no rebuild needed!)
+      - ./:/app/src:ro
+
+      # Persistent data storage (ambilight data, logs, cache)
+      - ${DATA_PATH:-./data}:/app/data
+
+      # Media file access (READ-ONLY) - CONFIGURE THESE FOR YOUR TARGET MACHINE
+      - ${MOVIES_PATH:-/path/to/movies}:/media/movies:ro
+      - ${TV_PATH:-/path/to/tv}:/media/tv:ro
+
+    # Resource limits (optional - adjust based on target hardware)
+    deploy:
+      resources:
+        limits:
+          memory: ${MEMORY_LIMIT:-2G}
+          cpus: ${CPU_LIMIT:-1.0}
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import requests; requests.get('${JELLYFIN_BASE_URL}/System/Info', headers={'Authorization': 'MediaBrowser Token=\"${JELLYFIN_API_KEY}\"'}, timeout=10)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    # Labels for management
+    labels:
+      - "com.jellyfin.ambilight.service=main"
+      - "com.jellyfin.ambilight.version=2.0"
+      - "com.jellyfin.ambilight.type=host-network"
+
+    # Default command: file-based daemon (fastest, no database)
+    command: ["python3", "-u", "/app/src/ambilight-daemon-files.py"]

@@ -1,0 +1,34 @@
+FROM python:3.11-alpine
+
+WORKDIR /app
+
+# Install ONLY ffmpeg (video processing)
+RUN apk add --no-cache ffmpeg
+
+# Copy zero-dependency requirements
+COPY requirements.zero.txt requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Create directories
+RUN mkdir -p /app/data/ambilight
+
+# Replace numpy-based extractor with pure Python version
+RUN echo '#!/bin/sh\n\
+echo "💎 ZERO-DEPENDENCY Jellyfin Ambilight"\n\
+echo "📦 Size: ~30MB (vs 2GB Debian!)"\n\
+echo "🚀 Pure Python + stdlib only"\n\
+echo "📡 $JELLYFIN_BASE_URL -> $WLED_HOST:$WLED_UDP_PORT"\n\
+\n\
+# Replace numpy extractor with pure Python version\n\
+if [ -f /app/src/frames/fast_extractor_pure.py ]; then\n\
+    cp /app/src/frames/fast_extractor_pure.py /app/src/frames/fast_extractor.py\n\
+    echo "✅ Using zero-dependency frame extractor"\n\
+fi\n\
+\n\
+exec python3 -u /app/src/ambilight-daemon-files.py\n\
+' > /entrypoint.sh && chmod +x /entrypoint.sh
+
+ENV PYTHONUNBUFFERED=1 \
+    AMBILIGHT_DATA_DIR=/app/data/ambilight
+
+ENTRYPOINT ["/entrypoint.sh"]

@@ -1,0 +1,35 @@
+FROM python:3.11-alpine
+
+WORKDIR /app
+
+# Install only ffmpeg
+RUN apk add --no-cache ffmpeg
+
+# Install only requests (could even remove this and use urllib!)
+RUN pip install --no-cache-dir requests==2.31.0
+
+# Create data directory
+RUN mkdir -p /app/data/ambilight
+
+# Simple startup
+ENV PYTHONUNBUFFERED=1 \
+    AMBILIGHT_DATA_DIR=/app/data/ambilight
+
+# Simple entrypoint script
+RUN echo '#!/bin/sh\n\
+echo "💎 Jellyfin Ambilight - Simplified Alpine"\n\
+echo "📦 Size: 181MB (vs 1.89GB Debian!)"\n\
+echo "🚀 Zero-dependency frame processing"\n\
+echo "📡 $JELLYFIN_BASE_URL -> $WLED_HOST:$WLED_UDP_PORT"\n\
+\n\
+# Use pure Python extractor if available\n\
+if [ -f /app/src/frames/fast_extractor_pure.py ]; then\n\
+    ln -sf /app/src/frames/fast_extractor_pure.py /app/src/frames/fast_extractor.py\n\
+    echo "✅ Using zero-dependency frame extractor"\n\
+fi\n\
+\n\
+# Start the daemon\n\
+exec python3 -u /app/src/ambilight-daemon-files.py\n\
+' > /entrypoint.sh && chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
