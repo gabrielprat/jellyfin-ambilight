@@ -38,6 +38,9 @@ WLED_UDP_PROTOCOL = os.getenv('WLED_UDP_PROTOCOL', 'WARLS').upper()  # DRGB, WAR
 WLED_UDP_TIMEOUT = int(os.getenv('WLED_UDP_TIMEOUT', '255'))  # 1..255; 255 = persistent
 WLED_LED_COUNT = int(os.getenv('WLED_LED_COUNT', '300'))  # Physical LEDs configured in WLED
 WLED_UDP_RAW_PORT = int(os.getenv('WLED_UDP_RAW_PORT', '19446'))  # Hyperion UDP raw default port
+SMOOTHING_ENABLED = os.getenv('SMOOTHING_ENABLED', 'true').lower() == 'true'
+SMOOTHING_ALPHA = float(os.getenv('SMOOTHING_ALPHA', '0.25'))  # 0..1, lower = smoother
+STREAM_FPS = float(os.getenv('FRAMES_PER_SECOND', '10'))  # Use extraction FPS for streaming cadence
 AMBILIGHT_TOP_LED_COUNT = int(os.getenv('AMBILIGHT_TOP_LED_COUNT', '89'))
 AMBILIGHT_BOTTOM_LED_COUNT = int(os.getenv('AMBILIGHT_BOTTOM_LED_COUNT', '89'))
 AMBILIGHT_LEFT_LED_COUNT = int(os.getenv('AMBILIGHT_LEFT_LED_COUNT', '49'))
@@ -61,6 +64,7 @@ EXTRACTION_BATCH_SIZE = int(os.getenv('EXTRACTION_BATCH_SIZE', '5'))
 
 # Device-WLED Pairing Configuration
 DEVICE_MATCH_FIELD = os.getenv('DEVICE_MATCH_FIELD', 'DeviceName')  # DeviceName, Client, or DeviceId
+ENABLE_EXTRACTION = os.getenv('ENABLE_EXTRACTION', 'true').lower() == 'true'
 
 # Global state
 shutdown_event = threading.Event()
@@ -77,6 +81,8 @@ class FileBasedAmbilightDaemon:
         self.storage = FileBasedStorage(AMBILIGHT_DATA_DIR)
         self.udp_cache: Dict[str, bytes] = {}  # Cache for frequently accessed packets
         self._last_state_by_device: Dict[str, bytearray] = {}  # For DNRGB sparse runs
+        self._last_raw_by_device: Dict[str, bytearray] = {}  # For UDP_RAW smoothing
+        self._session_stream_state: Dict[str, Dict] = {}  # session_id -> {last_index:int}
 
         # Initialize UDP socket
         self.init_udp_socket()
@@ -178,6 +184,21 @@ class FileBasedAmbilightDaemon:
                     raw = raw + bytes([0] * (need - len(raw)))
                 elif len(raw) > need:
                     raw = raw[:need]
+                # Optional smoothing (EMA) to reduce abrupt transitions
+                # if SMOOTHING_ENABLED:
+                #     device_key = f"{WLED_HOST}:{WLED_UDP_RAW_PORT}"
+                #     prev = self._last_raw_by_device.get(device_key)
+                #     if prev is None or len(prev) != need:
+                #         prev = bytearray(raw)
+                #     # Apply EMA: prev = prev + alpha*(raw - prev)
+                #     alpha = SMOOTHING_ALPHA
+                #     smoothed = bytearray(need)
+                #     for i in range(need):
+                #         p = prev[i]
+                #         c = raw[i]
+                #         smoothed[i] = int(p + (c - p) * alpha)
+                #     raw = bytes(smoothed)
+                #     self._last_raw_by_device[device_key] = bytearray(raw)
                 # Safety: enforce Hyperion UDP raw default port 19446
                 raw_port = WLED_UDP_RAW_PORT if WLED_UDP_RAW_PORT and WLED_UDP_RAW_PORT != 21324 else 19446
                 if raw_port != WLED_UDP_RAW_PORT:
@@ -311,6 +332,19 @@ class FileBasedAmbilightDaemon:
                     raw = raw + bytes([0] * (need - len(raw)))
                 elif len(raw) > need:
                     raw = raw[:need]
+                if SMOOTHING_ENABLED:
+                    device_key = f"{wled_host}:{WLED_UDP_RAW_PORT}"
+                    prev = self._last_raw_by_device.get(device_key)
+                    if prev is None or len(prev) != need:
+                        prev = bytearray(raw)
+                    alpha = SMOOTHING_ALPHA
+                    smoothed = bytearray(need)
+                    for i in range(need):
+                        p = prev[i]
+                        c = raw[i]
+                        smoothed[i] = int(p + (c - p) * alpha)
+                    raw = bytes(smoothed)
+                    self._last_raw_by_device[device_key] = bytearray(raw)
                 raw_port = WLED_UDP_RAW_PORT if WLED_UDP_RAW_PORT and WLED_UDP_RAW_PORT != 21324 else 19446
                 if raw_port != WLED_UDP_RAW_PORT:
                     logger.info(f"🔁 Using UDP RAW port {raw_port} (overriding {WLED_UDP_RAW_PORT}) for {wled_host}")
@@ -611,6 +645,13 @@ class FileBasedAmbilightDaemon:
                                         self.active_sessions[session_id] = {}
                                     self.active_sessions[session_id]['warned'] = True
 
+                        else:
+                            # Paused: immediately release realtime (send black frame once)
+                            try:
+                                self.turn_off_wled()
+                            except Exception:
+                                pass
+
                         # Track session
                         self.active_sessions[session_id] = {
                             'item_id': item_id,
@@ -781,14 +822,21 @@ class FileBasedAmbilightDaemon:
         # Show storage information
         self.show_storage_info()
 
-        # Start monitoring threads
-        library_thread = threading.Thread(target=self.scan_library_for_new_videos, daemon=True)
+        # Start monitoring and streaming threads
+        library_thread = None
+        if ENABLE_EXTRACTION:
+            library_thread = threading.Thread(target=self.scan_library_for_new_videos, daemon=True)
         playback_thread = threading.Thread(target=self.monitor_playback_with_files, daemon=True)
+        streamer_thread = threading.Thread(target=self.stream_frames_loop, daemon=True)
 
-        library_thread.start()
+        if library_thread is not None:
+            library_thread.start()
         playback_thread.start()
+        streamer_thread.start()
 
         logger.info("✅ File-based daemon started successfully!")
+        if not ENABLE_EXTRACTION:
+            logger.info("🛑 Extraction disabled via ENABLE_EXTRACTION=false - running playback only")
 
         try:
             # Keep main thread alive
@@ -800,6 +848,49 @@ class FileBasedAmbilightDaemon:
             shutdown_event.set()
             self.turn_off_wled()
             logger.info("🔚 File-based daemon stopped")
+
+    def stream_frames_loop(self):
+        """Continuously stream RAW frames to WLED at FPS, synchronized to playback position."""
+        if STREAM_FPS <= 0:
+            logger.warning("⚠️  STREAM_FPS <= 0, streaming disabled")
+            return
+
+        frame_dt = 1.0 / STREAM_FPS
+        while not shutdown_event.is_set():
+            try:
+                # Iterate over active sessions snapshot
+                sessions = list(self.active_sessions.items())
+                for session_id, info in sessions:
+                    if not info.get('is_playing', False):
+                        continue
+
+                    item_id = info.get('item_id')
+                    position_seconds = info.get('position_seconds', 0.0) or 0.0
+                    wled_host = info.get('wled_host', WLED_HOST)
+                    wled_port = info.get('wled_port', WLED_UDP_PORT)
+
+                    # Determine effective FPS from file metadata if available
+                    meta = self.storage.get_file_metadata(item_id)
+                    fps = meta.get('fps', STREAM_FPS) or STREAM_FPS
+                    target_index = int(position_seconds * fps)
+                    state = self._session_stream_state.setdefault(session_id, {'last_index': -1})
+
+                    # Send only if we haven't sent this index yet (or on seeks)
+                    if target_index != state['last_index']:
+                        # Retrieve closest frame by timestamp
+                        timestamp = target_index / fps
+                        udp_packet = self.storage.get_udp_packet_at_timestamp(item_id, timestamp)
+                        if udp_packet:
+                            # For UDP_RAW we expect pure RGB; other modes are supported too
+                            self.send_udp_packet_to_device(udp_packet, wled_host, wled_port)
+                            state['last_index'] = target_index
+                        else:
+                            # If data not ready, attempt to load into memory (non-blocking path already inside storage)
+                            pass
+                time.sleep(frame_dt * 0.5)  # small sleep to allow ~2x check rate
+            except Exception as e:
+                logger.error(f"Streaming loop error: {e}")
+                time.sleep(0.1)
 
 def signal_handler(signum, frame):
     """Handle shutdown signals"""

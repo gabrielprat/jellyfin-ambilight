@@ -134,7 +134,7 @@ def _extract_border_colors_pure(frame_bytes: bytes, width: int, height: int) -> 
     Frame format: RGB24, so each pixel = 3 bytes (R, G, B)
     """
     # Check if border detection is enabled
-    border_detection_enabled = os.getenv('BLACK_BORDER_DETECTION', 'true').lower() == 'true'
+    border_detection_enabled = os.getenv('BLACK_BORDER_DETECTION', 'false').lower() == 'true'
     border_threshold = int(os.getenv('BORDER_THRESHOLD', '10'))
 
     if not border_detection_enabled:
@@ -321,6 +321,14 @@ def extract_fast_pure(item_id: str, video_path: str, item_name: str, storage) ->
     frame_index = 0
 
     with storage.start_udp_session(item_id) as session:
+        # Write metadata header once at start
+        # Header: 'UDPR'[4] + version u8 + fps f32 + wled_led_count u16 + expected_led_count u16 + protocol u8 + reserved u8
+        version = 1
+        protocol = 0  # 0 for RAW
+        header = bytearray(b'UDPR')
+        header.append(version)
+        header.extend(struct.pack('<fHHBB', FPS, WLED_LED_COUNT, EXPECTED_LED_COUNT, protocol, 0))
+        session.write_header(bytes(header))
         while True:
             # Read one frame
             raw_frame = proc.stdout.read(frame_size)

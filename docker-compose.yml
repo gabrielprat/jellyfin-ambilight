@@ -42,12 +42,13 @@ services:
       - FRAMES_PER_SECOND=${FRAMES_PER_SECOND:-10}
       - EXTRACTION_PRIORITY=${EXTRACTION_PRIORITY:-newest_first}
       - EXTRACTION_BATCH_SIZE=${EXTRACTION_BATCH_SIZE:-5}
-      - BLACK_BORDER_DETECTION=${BLACK_BORDER_DETECTION:-true}
+      - BLACK_BORDER_DETECTION=${BLACK_BORDER_DETECTION:-false}
       - BORDER_THRESHOLD=${BORDER_THRESHOLD:-10}
 
       # Service Intervals
       - LIBRARY_SCAN_INTERVAL=${LIBRARY_SCAN_INTERVAL:-1800}
       - PLAYBACK_MONITOR_INTERVAL=${PLAYBACK_MONITOR_INTERVAL:-0.05}
+      - ENABLE_EXTRACTION=${ENABLE_EXTRACTION:-true}
 
       # Storage
       - AMBILIGHT_DATA_DIR=/app/data/ambilight
@@ -68,14 +69,7 @@ services:
       - ${TV_PATH:-./test-media/tv}:/media/tv:ro
 
     # Minimal resource usage
-    deploy:
-      resources:
-        limits:
-          memory: ${MEMORY_LIMIT:-200M}
-          cpus: '${CPU_LIMIT:-0.3}'
-        reservations:
-          memory: 50M
-          cpus: '0.1'
+    # Removed deploy resource limits to avoid cgroup warnings on non-supporting kernels
 
     # DNS configuration for homelab - multiple fallbacks for reliability
     dns:

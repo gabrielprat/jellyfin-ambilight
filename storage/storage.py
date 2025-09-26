@@ -41,6 +41,7 @@ class OptimizedFileBasedStorage:
         # Memory cache for loaded UDP data
         self._udp_cache: Dict[str, Dict[float, bytes]] = {}
         self._cache_timestamps: Dict[str, float] = {}
+        self._file_metadata: Dict[str, Dict] = {}
 
         # Ensure directories exist
         self.items_dir.mkdir(parents=True, exist_ok=True)
@@ -106,9 +107,46 @@ class OptimizedFileBasedStorage:
                 file_size = udp_file.stat().st_size
                 bytes_read = 0
 
+                # Optional header: 'UDPR' magic + version + metadata
+                header_checked = False
                 while bytes_read < file_size:
                     # Read timestamp (4 bytes)
-                    timestamp_bytes = f.read(4)
+                    if not header_checked:
+                        peek = f.read(4)
+                        if len(peek) < 4:
+                            break
+                        if peek == b'UDPR':
+                            # Header format: 'UDPR'[4] + version u8 + fps f32 + wled_led_count u16 + expected_led_count u16 + protocol u8 + reserved u8
+                            version_b = f.read(1)
+                            meta = f.read(4 + 2 + 2 + 1 + 1)
+                            if len(version_b) == 1 and len(meta) == 10:
+                                import struct
+                                version = version_b[0]
+                                fps, wled_leds, expected_leds, protocol, _ = struct.unpack('<fHHBB', meta)
+                                self._file_metadata[item_id] = {
+                                    'version': version,
+                                    'fps': fps,
+                                    'wled_led_count': wled_leds,
+                                    'expected_led_count': expected_leds,
+                                    'protocol': protocol,
+                                }
+                                bytes_read += 4 + 1 + 10
+                                header_checked = True
+                                # Read the first timestamp after header
+                                timestamp_bytes = f.read(4)
+                                if len(timestamp_bytes) < 4:
+                                    break
+                            else:
+                                # Invalid header; rewind and treat as timestamp
+                                f.seek(- (1 + len(meta)), 1)
+                                timestamp_bytes = peek
+                                header_checked = True
+                        else:
+                            # No header, treat as timestamp
+                            timestamp_bytes = peek
+                            header_checked = True
+                    else:
+                        timestamp_bytes = f.read(4)
                     if len(timestamp_bytes) < 4:
                         break
 
@@ -159,6 +197,13 @@ class OptimizedFileBasedStorage:
                                key=lambda t: abs(t - timestamp_seconds))
 
         return udp_data.get(closest_timestamp)
+
+    def get_file_metadata(self, item_id: str) -> Dict:
+        """Return metadata for udpdata file if present (fps, counts, protocol)."""
+        # Ensure metadata is loaded
+        if item_id not in self._file_metadata:
+            self.load_udp_data_into_memory(item_id)
+        return self._file_metadata.get(item_id, {})
 
     def frame_exists(self, item_id: str, timestamp_seconds: float) -> bool:
         """Check if frame exists for timestamp"""
@@ -386,6 +431,13 @@ class UDPWriteSession:
         # Write to memory buffer instead of file
         self._write_udp_entry_to_buffer(timestamp, udp_packet)
         self.timestamps.append(timestamp)
+
+    def write_header(self, header_bytes: bytes):
+        """Write a binary header at the start of the file buffer (use before frames)."""
+        if self.memory_buffer:
+            # Header must be written before any frames
+            return
+        self.memory_buffer.extend(header_bytes)
 
     def _write_udp_entry_to_buffer(self, timestamp: float, udp_packet: bytes):
         """Write single UDP entry to memory buffer in binary format"""
