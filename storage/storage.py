@@ -42,6 +42,8 @@ class OptimizedFileBasedStorage:
         self._udp_cache: Dict[str, Dict[float, bytes]] = {}
         self._cache_timestamps: Dict[str, float] = {}
         self._file_metadata: Dict[str, Dict] = {}
+        # Ordered frame cache for O(1) index lookup
+        self._udp_frames: Dict[str, List[bytes]] = {}
 
         # Ensure directories exist
         self.items_dir.mkdir(parents=True, exist_ok=True)
@@ -169,6 +171,9 @@ class OptimizedFileBasedStorage:
 
             # Cache the data
             self._udp_cache[item_id] = udp_data
+            # Build ordered frame list for fast index access
+            ordered_ts = sorted(udp_data.keys())
+            self._udp_frames[item_id] = [udp_data[t] for t in ordered_ts]
             self._cache_timestamps[item_id] = time.time()
 
             print(f"✅ Loaded {len(udp_data):,} UDP packets into memory")
@@ -204,6 +209,20 @@ class OptimizedFileBasedStorage:
         if item_id not in self._file_metadata:
             self.load_udp_data_into_memory(item_id)
         return self._file_metadata.get(item_id, {})
+
+    def get_udp_packet_by_index(self, item_id: str, frame_index: int) -> Optional[bytes]:
+        """Fast O(1) frame access by index (built from sorted timestamps)."""
+        if item_id not in self._udp_frames:
+            if not self.load_udp_data_into_memory(item_id):
+                return None
+        frames = self._udp_frames.get(item_id, [])
+        if not frames:
+            return None
+        if frame_index < 0:
+            frame_index = 0
+        if frame_index >= len(frames):
+            frame_index = len(frames) - 1
+        return frames[frame_index]
 
     def frame_exists(self, item_id: str, timestamp_seconds: float) -> bool:
         """Check if frame exists for timestamp"""

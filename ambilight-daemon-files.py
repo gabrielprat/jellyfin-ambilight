@@ -878,8 +878,8 @@ class FileBasedAmbilightDaemon:
                     # Send only if we haven't sent this index yet (or on seeks)
                     if target_index != state['last_index']:
                         # Retrieve closest frame by timestamp
-                        timestamp = target_index / fps
-                        udp_packet = self.storage.get_udp_packet_at_timestamp(item_id, timestamp)
+                        # Fast O(1) access by index to avoid timestamp search overhead
+                        udp_packet = self.storage.get_udp_packet_by_index(item_id, target_index)
                         if udp_packet:
                             # For UDP_RAW we expect pure RGB; other modes are supported too
                             self.send_udp_packet_to_device(udp_packet, wled_host, wled_port)
@@ -887,7 +887,8 @@ class FileBasedAmbilightDaemon:
                         else:
                             # If data not ready, attempt to load into memory (non-blocking path already inside storage)
                             pass
-                time.sleep(frame_dt * 0.5)  # small sleep to allow ~2x check rate
+                # Single sleep per loop to reduce CPU usage while maintaining responsiveness
+                time.sleep(frame_dt)
             except Exception as e:
                 logger.error(f"Streaming loop error: {e}")
                 time.sleep(0.1)
