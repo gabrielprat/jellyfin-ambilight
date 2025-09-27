@@ -41,6 +41,10 @@ WLED_UDP_RAW_PORT = int(os.getenv('WLED_UDP_RAW_PORT', '19446'))  # Hyperion UDP
 SMOOTHING_ENABLED = os.getenv('SMOOTHING_ENABLED', 'true').lower() == 'true'
 SMOOTHING_ALPHA = float(os.getenv('SMOOTHING_ALPHA', '0.25'))  # 0..1, lower = smoother
 STREAM_FPS = float(os.getenv('FRAMES_PER_SECOND', '10'))  # Use extraction FPS for streaming cadence
+TARGET_STREAM_FPS = float(os.getenv('TARGET_STREAM_FPS', '0'))  # 0=disabled; if >0, upsample with interpolation
+COLOR_FILTER_ENABLED = os.getenv('COLOR_FILTER_ENABLED', 'false').lower() == 'true'
+DARK_BRIGHTNESS_THRESHOLD = int(os.getenv('DARK_BRIGHTNESS_THRESHOLD', '18'))  # 0..255
+SATURATION_BOOST = float(os.getenv('SATURATION_BOOST', '1.25'))  # 1.0=no change
 AMBILIGHT_TOP_LED_COUNT = int(os.getenv('AMBILIGHT_TOP_LED_COUNT', '89'))
 AMBILIGHT_BOTTOM_LED_COUNT = int(os.getenv('AMBILIGHT_BOTTOM_LED_COUNT', '89'))
 AMBILIGHT_LEFT_LED_COUNT = int(os.getenv('AMBILIGHT_LEFT_LED_COUNT', '49'))
@@ -332,6 +336,8 @@ class FileBasedAmbilightDaemon:
                     raw = raw + bytes([0] * (need - len(raw)))
                 elif len(raw) > need:
                     raw = raw[:need]
+                if COLOR_FILTER_ENABLED:
+                    raw = self._apply_color_filter(raw)
                 if SMOOTHING_ENABLED:
                     device_key = f"{wled_host}:{WLED_UDP_RAW_PORT}"
                     prev = self._last_raw_by_device.get(device_key)
@@ -659,8 +665,29 @@ class FileBasedAmbilightDaemon:
                             'is_playing': is_playing,
                             'position_seconds': position_seconds,
                             'last_seen': datetime.now(),
-                            'warned': self.active_sessions.get(session_id, {}).get('warned', False)
+                            'warned': self.active_sessions.get(session_id, {}).get('warned', False),
+                            'wled_host': wled_host,
+                            'wled_port': wled_port
                         }
+
+                        # Reset sync state if this is a new item or significant position jump (seek)
+                        if session_id in self._session_stream_state:
+                            stream_state = self._session_stream_state[session_id]
+                            last_item = stream_state.get('last_item_id')
+                            last_position = stream_state.get('last_position', 0)
+
+                            # Reset if new item or significant seek (>2 seconds jump)
+                            if (last_item != item_id or
+                                abs(position_seconds - last_position) > 2.0):
+                                logger.info(f"🔄 Resetting sync state for {item_id} (new item or seek)")
+                                self._session_stream_state[session_id] = {
+                                    'last_index': -1,
+                                    'data_load_start_time': None,
+                                    'sync_offset': 0.0,
+                                    'data_loaded': False,
+                                    'last_item_id': item_id,
+                                    'last_position': position_seconds
+                                }
 
                 else:
                     # No active sessions - turn off ambilight
@@ -752,47 +779,45 @@ class FileBasedAmbilightDaemon:
                 # Update library
                 self.perform_incremental_library_update(user_id)
 
-                # Get extraction statistics
-                stats = self.storage.get_extraction_statistics()
-                logger.info(f"📊 Extraction status: {stats['extracted_videos']}/{stats['total_videos']} " +
-                           f"({stats['completion_percentage']:.1f}% complete)")
+                # Drain all pending videos in successive batches without waiting the long interval
+                while not shutdown_event.is_set():
+                    stats = self.storage.get_extraction_statistics()
+                    logger.info(f"📊 Extraction status: {stats['extracted_videos']}/{stats['total_videos']} " +
+                               f"({stats['completion_percentage']:.1f}% complete)")
 
-                if stats['pending_videos'] > 0:
-                    # Get videos that need extraction, prioritized
+                    if stats['pending_videos'] <= 0:
+                        logger.info("✅ No pending videos to extract")
+                        break
+
                     videos_to_process = self.storage.get_videos_needing_extraction(
                         priority_order=EXTRACTION_PRIORITY,
                         limit=EXTRACTION_BATCH_SIZE
                     )
-                    print(f"✅ Videos aquired: {len(videos_to_process)}")
-                    if videos_to_process:
-                        logger.info(f"🎬 Processing {len(videos_to_process)} videos with file storage...")
+                    batch_count = len(videos_to_process)
+                    if batch_count == 0:
+                        logger.info("✅ Extraction queue empty")
+                        break
 
-                        for i, item in enumerate(videos_to_process):
-                            if shutdown_event.is_set():
-                                break
-
-                            logger.info(f"📁 Extraction {i+1} of {len(videos_to_process)} videos: {item['name']}")
-
-                            try:
-                                # Use file-based extraction (dynamic import)
-                                extracted = extract_fast(
-                                    item['id'],
-                                    item['filepath'],
-                                    item['name'],
-                                    self.storage
-                                )
-
-                                if extracted > 0:
-                                    logger.info(f"✅ Completed: {item['name']} ({extracted} UDP files)")
-                                else:
-                                    logger.warning(f"⚠️  No frames extracted for: {item['name']}")
-
-                            except Exception as e:
-                                logger.error(f"❌ Failed file extraction for {item['name']}: {e}")
-                    else:
-                        logger.info("✅ All videos have frames extracted 1")
-                else:
-                    logger.info("✅ All videos have frames extracted 2")
+                    logger.info(f"🎬 Processing batch of {batch_count} videos...")
+                    for i, item in enumerate(videos_to_process):
+                        if shutdown_event.is_set():
+                            break
+                        logger.info(f"📁 Extraction {i+1}/{batch_count}: {item['name']}")
+                        try:
+                            extracted = extract_fast(
+                                item['id'],
+                                item['filepath'],
+                                item['name'],
+                                self.storage
+                            )
+                            if extracted > 0:
+                                logger.info(f"✅ Completed: {item['name']} ({extracted} UDP frames)")
+                            else:
+                                logger.warning(f"⚠️  No frames extracted for: {item['name']}")
+                        except Exception as e:
+                            logger.error(f"❌ Failed extraction for {item['name']}: {e}")
+                    # small pause between batches to yield CPU
+                    time.sleep(1)
 
             except Exception as e:
                 logger.error(f"Error in library scanning: {e}")
@@ -855,7 +880,6 @@ class FileBasedAmbilightDaemon:
             logger.warning("⚠️  STREAM_FPS <= 0, streaming disabled")
             return
 
-        frame_dt = 1.0 / STREAM_FPS
         while not shutdown_event.is_set():
             try:
                 # Iterate over active sessions snapshot
@@ -872,26 +896,93 @@ class FileBasedAmbilightDaemon:
                     # Determine effective FPS from file metadata if available
                     meta = self.storage.get_file_metadata(item_id)
                     fps = meta.get('fps', STREAM_FPS) or STREAM_FPS
-                    target_index = int(position_seconds * fps)
-                    state = self._session_stream_state.setdefault(session_id, {'last_index': -1})
+                    # Upsample stream timing if TARGET_STREAM_FPS specified
+                    # effective_fps = TARGET_STREAM_FPS if TARGET_STREAM_FPS and TARGET_STREAM_FPS > fps else fps
+
+                    # Get stream state for this session
+                    state = self._session_stream_state.setdefault(session_id, {
+                        'last_index': -1,
+                        'data_load_start_time': None,
+                        'sync_offset': 0.0,
+                        'data_loaded': False,
+                        'last_item_id': item_id,
+                        'last_position': position_seconds
+                    })
+
+                    # Check if we need to load data and track loading time
+                    if not state['data_loaded']:
+                        if state['data_load_start_time'] is None:
+                            # Start loading data and record start time
+                            state['data_load_start_time'] = time.time()
+                            logger.info(f"🔄 Loading UDP data for {item_id}...")
+
+                        # Try to get frame to trigger data loading
+                        base = self.storage.get_udp_packet_by_index(item_id, 0)
+                        if base is not None:
+                            # Data is now loaded, calculate sync offset
+                            load_time = time.time() - state['data_load_start_time']
+                            state['sync_offset'] = load_time
+                            state['data_loaded'] = True
+                            logger.info(f"✅ UDP data loaded in {load_time:.2f}s - sync offset applied")
+                        else:
+                            # Still loading, skip this frame
+                            continue
+
+                    # Apply sync offset to compensate for loading delay
+                    adjusted_position = position_seconds - state['sync_offset']
+                    if adjusted_position < 0:
+                        adjusted_position = 0.0
+
+                    target_index = int(adjusted_position * fps)
 
                     # Send only if we haven't sent this index yet (or on seeks)
                     if target_index != state['last_index']:
-                        # Retrieve closest frame by timestamp
-                        # Fast O(1) access by index to avoid timestamp search overhead
-                        udp_packet = self.storage.get_udp_packet_by_index(item_id, target_index)
-                        if udp_packet:
-                            # For UDP_RAW we expect pure RGB; other modes are supported too
-                            self.send_udp_packet_to_device(udp_packet, wled_host, wled_port)
+                        # Retrieve base frame (O(1) by index)
+                        base = self.storage.get_udp_packet_by_index(item_id, target_index)
+                        if base:
+                            to_send = base
+                            if TARGET_STREAM_FPS and TARGET_STREAM_FPS > fps:
+                                # Interpolate towards next frame according to fractional position
+                                frac = (adjusted_position * fps) - target_index
+                                nxt = self.storage.get_udp_packet_by_index(item_id, target_index + 1)
+                                if nxt and len(nxt) == len(base) and frac > 0:
+                                    L = len(base)
+                                    blended = bytearray(L)
+                                    for i in range(L):
+                                        blended[i] = int(base[i] + (nxt[i] - base[i]) * frac)
+                                    to_send = bytes(blended)
+                            self.send_udp_packet_to_device(to_send, wled_host, wled_port)
                             state['last_index'] = target_index
+                            state['last_position'] = position_seconds
                         else:
                             # If data not ready, attempt to load into memory (non-blocking path already inside storage)
                             pass
-                # Single sleep per loop to reduce CPU usage while maintaining responsiveness
-                time.sleep(frame_dt)
+                # Sleep using effective fps for steady cadence
+                eff = TARGET_STREAM_FPS if TARGET_STREAM_FPS and TARGET_STREAM_FPS > 0 else STREAM_FPS
+                time.sleep(1.0 / eff)
             except Exception as e:
                 logger.error(f"Streaming loop error: {e}")
                 time.sleep(0.1)
+
+    def _apply_color_filter(self, raw: bytes) -> bytes:
+        """Reduce white tint in dark scenes and boost saturation slightly."""
+        data = bytearray(raw)
+        thr = DARK_BRIGHTNESS_THRESHOLD
+        boost = SATURATION_BOOST
+        for i in range(0, len(data), 3):
+            r = data[i]
+            g = data[i+1]
+            b = data[i+2]
+            m = (r + g + b) / 3.0
+            if m < thr:
+                data[i] = 0
+                data[i+1] = 0
+                data[i+2] = 0
+            else:
+                data[i] = max(0, min(255, int(m + (r - m) * boost)))
+                data[i+1] = max(0, min(255, int(m + (g - m) * boost)))
+                data[i+2] = max(0, min(255, int(m + (b - m) * boost)))
+        return bytes(data)
 
 def signal_handler(signum, frame):
     """Handle shutdown signals"""
