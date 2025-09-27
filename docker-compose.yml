@@ -24,6 +24,9 @@ services:
       - WLED_UDP_RAW_PORT=${WLED_UDP_RAW_PORT:-19446}
       - WLED_LED_COUNT=${WLED_LED_COUNT:-300}
 
+      # Network resilience (sync-first approach)
+      - UDP_SKIP_ON_BUSY=${UDP_SKIP_ON_BUSY:-true}
+
       # Device-WLED Pairing (Multi-room setup)
       - DEVICE_MATCH_FIELD=${DEVICE_MATCH_FIELD:-DeviceName}
       # Example device mappings (uncomment and configure as needed):

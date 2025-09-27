@@ -45,6 +45,9 @@ TARGET_STREAM_FPS = float(os.getenv('TARGET_STREAM_FPS', '0'))  # 0=disabled; if
 COLOR_FILTER_ENABLED = os.getenv('COLOR_FILTER_ENABLED', 'false').lower() == 'true'
 DARK_BRIGHTNESS_THRESHOLD = int(os.getenv('DARK_BRIGHTNESS_THRESHOLD', '18'))  # 0..255
 SATURATION_BOOST = float(os.getenv('SATURATION_BOOST', '1.25'))  # 1.0=no change
+
+# Network resilience (sync-first approach)
+UDP_SKIP_ON_BUSY = os.getenv('UDP_SKIP_ON_BUSY', 'true').lower() == 'true'  # Skip packets when network busy
 AMBILIGHT_TOP_LED_COUNT = int(os.getenv('AMBILIGHT_TOP_LED_COUNT', '89'))
 AMBILIGHT_BOTTOM_LED_COUNT = int(os.getenv('AMBILIGHT_BOTTOM_LED_COUNT', '89'))
 AMBILIGHT_LEFT_LED_COUNT = int(os.getenv('AMBILIGHT_LEFT_LED_COUNT', '49'))
@@ -354,8 +357,9 @@ class FileBasedAmbilightDaemon:
                 raw_port = WLED_UDP_RAW_PORT if WLED_UDP_RAW_PORT and WLED_UDP_RAW_PORT != 21324 else 19446
                 if raw_port != WLED_UDP_RAW_PORT:
                     logger.info(f"🔁 Using UDP RAW port {raw_port} (overriding {WLED_UDP_RAW_PORT}) for {wled_host}")
-                self.udp_socket.sendto(raw, (wled_host, raw_port))
-                return True
+
+                # Send with retry logic for network resilience
+                return self._send_udp_with_retry(raw, wled_host, raw_port)
 
             # MPKT container support
             if len(udp_packet) >= 4 and udp_packet[:4] == b'MPKT':
@@ -373,7 +377,7 @@ class FileBasedAmbilightDaemon:
                     pkt = udp_packet[offset:offset+plen]
                     offset += plen
                     if pkt:
-                        self.udp_socket.sendto(pkt, (wled_host, wled_port))
+                        self._send_udp_with_retry(pkt, wled_host, wled_port)
                 return True
 
             # Accept DRGB frames from storage and convert based on configured protocol
@@ -408,7 +412,7 @@ class FileBasedAmbilightDaemon:
 
             if WLED_UDP_PROTOCOL == 'DRGB':
                 packet_to_send = b'DRGB' + bytes([timeout_byte]) + rgb_payload
-                self.udp_socket.sendto(packet_to_send, (wled_host, wled_port))
+                self._send_udp_with_retry(packet_to_send, wled_host, wled_port)
             elif WLED_UDP_PROTOCOL == 'WARLS':
                 num_leds = len(rgb_payload) // 3
                 max_leds = min(num_leds, 255)
@@ -419,7 +423,7 @@ class FileBasedAmbilightDaemon:
                     base = i * 3
                     r, g, b = rgb_payload[base], rgb_payload[base + 1], rgb_payload[base + 2]
                     packet.extend([i & 0xFF, r, g, b])
-                self.udp_socket.sendto(bytes(packet), (wled_host, wled_port))
+                self._send_udp_with_retry(bytes(packet), wled_host, wled_port)
             elif WLED_UDP_PROTOCOL == 'DNRGB':
                 # DNRGB sparse
                 device_key = f"{wled_host}:{wled_port}"
@@ -443,19 +447,43 @@ class FileBasedAmbilightDaemon:
                         start_lo = run_start & 0xFF
                         pkt = bytearray([4, WLED_UDP_TIMEOUT if WLED_UDP_TIMEOUT else 1, start_hi, start_lo])
                         pkt.extend(chunk)
-                        self.udp_socket.sendto(bytes(pkt), (wled_host, wled_port))
+                        self._send_udp_with_retry(bytes(pkt), wled_host, wled_port)
                     else:
                         i += 1
                 self._last_state_by_device[device_key] = last_state
             else:
                 # UDP_RAW
-                try:
-                    self.udp_socket.sendto(bytes(rgb_payload[: WLED_LED_COUNT * 3]), (wled_host, WLED_UDP_RAW_PORT))
-                except Exception as e:
-                    logger.error(f"UDP RAW transmission error to {wled_host}:{WLED_UDP_RAW_PORT}: {e}")
+                return self._send_udp_with_retry(bytes(rgb_payload[: WLED_LED_COUNT * 3]), wled_host, WLED_UDP_RAW_PORT)
             return True
         except Exception as e:
             logger.error(f"UDP transmission error to {wled_host}:{wled_port}: {e}")
+            return False
+
+    def _send_udp_with_retry(self, data, host, port, max_retries=None):
+        """Send UDP data with single attempt - skip on failure to maintain sync"""
+        if not self.udp_socket or not data:
+            return False
+
+        try:
+            # Single attempt - no retries to maintain sync
+            self.udp_socket.sendto(data, (host, port))
+            return True
+        except OSError as e:
+            if e.errno == -3:  # "Try again" error
+                # Skip this packet silently to maintain sync
+                if UDP_SKIP_ON_BUSY:
+                    logger.debug(f"UDP send skipped (network busy) to {host}:{port}")
+                    return False
+                else:
+                    # Log the skip for debugging
+                    logger.warning(f"UDP send failed (network busy) to {host}:{port}")
+                    return False
+            else:
+                # Other network errors - log once per session
+                logger.error(f"UDP network error to {host}:{port}: {e}")
+                return False
+        except Exception as e:
+            logger.error(f"UDP transmission error to {host}:{port}: {e}")
             return False
 
     def log_session_device_info(self, session: Dict):
