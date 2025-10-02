@@ -7,22 +7,14 @@ services:
     hostname: jellyfin-ambilight
     restart: unless-stopped
 
-    # Use custom homelab network with static IP
-    networks:
-      homelab-network:
-        ipv4_address: ${HOMELAB_IP}
+    # Load environment variables from .env and pass them into the container
+    env_file:
+      - .env
 
     environment:
       # Jellyfin Configuration (REQUIRED)
       - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:-9b53498f4e1b4325a420fd705fea0020}
       - JELLYFIN_BASE_URL=${JELLYFIN_BASE_URL:-https://jellyfin.galagaon.com}
-
-      # WLED Configuration
-      - WLED_HOST=${WLED_HOST:-wled-ambilight-lgc1.lan}
-      - WLED_UDP_PORT=${WLED_UDP_PORT:-21324}
-      - WLED_UDP_PROTOCOL=${WLED_UDP_PROTOCOL:-UDP_RAW}
-      - WLED_UDP_RAW_PORT=${WLED_UDP_RAW_PORT:-19446}
-      - WLED_LED_COUNT=${WLED_LED_COUNT:-300}
 
       # Network resilience (sync-first approach)
       - UDP_SKIP_ON_BUSY=${UDP_SKIP_ON_BUSY:-true}
@@ -53,8 +45,7 @@ services:
       - PLAYBACK_MONITOR_INTERVAL=${PLAYBACK_MONITOR_INTERVAL:-0.05}
       - ENABLE_EXTRACTION=${ENABLE_EXTRACTION:-true}
 
-      # Storage
-      - AMBILIGHT_DATA_DIR=/app/data/ambilight
+      - AMBILIGHT_DATA_DIR=${AMBILIGHT_DATA_DIR:-/app/data/ambilight}
 
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
@@ -73,6 +64,10 @@ services:
 
     # Minimal resource usage
     # Removed deploy resource limits to avoid cgroup warnings on non-supporting kernels
+
+    # Use custom homelab network with static IP
+    networks:
+      homelab-network:
 
     # DNS configuration for homelab - multiple fallbacks for reliability
     dns:

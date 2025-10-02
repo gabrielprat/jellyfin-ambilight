@@ -1,0 +1,52 @@
+version: "3.8"
+
+services:
+  jellyfin-ambilight:
+    container_name: jellyfin-ambilight
+    build: .
+    restart: unless-stopped
+    environment:
+      # --- Jellyfin configuration ---
+      JELLYFIN_SERVER: "https://jellyfin.galagaon.com"
+      JELLYFIN_API_KEY: "9b53498f4e1b4325a420fd705fea0020"
+      JELLYFIN_USER: "gabi"
+      JELLYFIN_PASS: "Jellyfin2025!"
+      JELLYFIN_PASSWORD: "Jellyfin2025!"
+      # --WLED configuration ---
+      WLED_HOST: "wled-ambilight-lgc1.lan"
+      WLED_PORT: 19446
+
+      # --Ambilight extraction configuration ---
+      AMBILIGHT_WIDTH: 89
+      AMBILIGHT_HEIGHT: 49
+      AMBILIGHT_FPS: 20
+      AMBILIGHT_OFFSET: 46
+
+      # --Paths inside the container ---
+      MOVIES_PATH: "/movies"
+      SERIES_PATH: "/series"
+      BINARIES_PATH: "/ambilight_data"
+
+    volumes:
+      - /mnt/all_disks/Movies:/movies:ro
+      - /mnt/all_disks/Series:/series:ro
+      - /mnt/5TB20241012/jellyfin-ambilight/binaries:/ambilight_data
+      - ./ambilight.py:/app/ambilight.py:ro
+      - ./requirements.txt:/app/requirements.txt:ro
+
+    working_dir: /app
+    command: ["python", "ambilight.py"]
+    dns:
+      - 192.168.1.191  # Primary homelab DNS
+      - 1.1.1.1        # Cloudflare DNS (fallback)
+      - 8.8.8.8        # Google DNS (fallback)
+
+    # Additional DNS options for reliability
+    networks:
+      homelab-network:
+    dns_opt:
+      - timeout:2
+      - attempts:3
+networks:
+  homelab-network:
+    external: true

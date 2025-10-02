@@ -35,8 +35,9 @@ class OptimizedFileBasedStorage:
     def __init__(self, data_dir: str = DATA_DIR):
         self.data_dir = Path(data_dir)
         self.items_dir = self.data_dir / "items"
-        self.udp_dir = self.data_dir / "udp"  # Single UDP file per video
-        self.metadata_dir = self.data_dir / "metadata"
+        self.udp_dir = self.data_dir / "udp"  # DEPRECATED
+        self.metadata_dir = self.data_dir / "metadata"  # DEPRECATED
+        self.binaries_dir = self.data_dir / "binaries"
 
         # Memory cache for loaded UDP data
         self._udp_cache: Dict[str, Dict[float, bytes]] = {}
@@ -45,10 +46,9 @@ class OptimizedFileBasedStorage:
         # Ordered frame cache for O(1) index lookup
         self._udp_frames: Dict[str, List[bytes]] = {}
 
-        # Ensure directories exist
+        # Ensure directories exist (only active ones)
         self.items_dir.mkdir(parents=True, exist_ok=True)
-        self.udp_dir.mkdir(parents=True, exist_ok=True)
-        self.metadata_dir.mkdir(parents=True, exist_ok=True)
+        self.binaries_dir.mkdir(parents=True, exist_ok=True)
 
         print(f"📁 Optimized storage initialized: {self.data_dir}")
 
@@ -236,17 +236,7 @@ class OptimizedFileBasedStorage:
             return any(abs(t - timestamp_seconds) < 0.01
                       for t in self._udp_cache[item_id].keys())
 
-        # For existence check, we can check file metadata
-        metadata_file = self.metadata_dir / f"{item_id}.json"
-        if metadata_file.exists():
-            try:
-                with open(metadata_file, 'r') as f:
-                    metadata = json.load(f)
-                    timestamps = metadata.get('timestamps', [])
-                    return any(abs(t - timestamp_seconds) < 0.01 for t in timestamps)
-            except:
-                pass
-
+        # No metadata index anymore
         return False
 
     def get_videos_needing_extraction(self, priority_order: str = 'newest_first', limit: int = None) -> List[Dict]:
@@ -272,9 +262,9 @@ class OptimizedFileBasedStorage:
                 if not os.path.exists(filepath):
                     continue  # Simply skip missing files completely
 
-                # Check if UDP data exists
-                udp_file = self.udp_dir / f"{item_data['id']}.udpdata"
-                if not udp_file.exists():
+                # Check if binary exists
+                bin_file = self.binaries_dir / f"{item_data['id']}.bin"
+                if not bin_file.exists():
                     videos_needing_extraction.append(item_data)
 
             except (json.JSONDecodeError, IOError):
@@ -309,9 +299,9 @@ class OptimizedFileBasedStorage:
                     if filepath and filepath not in ['Unknown', ''] and os.path.exists(filepath):
                         total_videos += 1
 
-                        # Check if UDP file exists
-                        udp_file = self.udp_dir / f"{item_data['id']}.udpdata"
-                        if udp_file.exists():
+                        # Check if binary exists
+                        bin_file = self.binaries_dir / f"{item_data['id']}.bin"
+                        if bin_file.exists():
                             extracted_videos += 1
 
             except (json.JSONDecodeError, IOError):
@@ -330,27 +320,26 @@ class OptimizedFileBasedStorage:
     def get_storage_info(self) -> Dict:
         """Get storage usage information"""
         total_size = 0
-        udp_file_count = 0
+        bin_file_count = 0
 
-        # Count UDP files
-        for udp_file in self.udp_dir.glob("*.udpdata"):
+        # Count binary files
+        for bin_file in self.binaries_dir.glob("*.bin"):
             try:
-                total_size += udp_file.stat().st_size
-                udp_file_count += 1
+                total_size += bin_file.stat().st_size
+                bin_file_count += 1
             except OSError:
                 pass
 
         # Count other files
         other_files = 0
-        for json_file in self.metadata_dir.glob("*.json"):
-            other_files += 1
+        # metadata dir deprecated
         for json_file in self.items_dir.glob("*.json"):
             other_files += 1
 
         return {
             'total_size_bytes': total_size,
             'total_size_mb': total_size / (1024 * 1024),
-            'udp_file_count': udp_file_count,
+            'binary_file_count': bin_file_count,
             'index_file_count': other_files,
             'data_directory': str(self.data_dir)
         }
