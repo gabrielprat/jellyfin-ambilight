@@ -18,7 +18,6 @@ import socket
 import signal
 import logging
 import requests
-import socket
 from urllib.parse import urlparse
 import struct
 from datetime import datetime
@@ -57,6 +56,7 @@ TARGET_STREAM_FPS = float(os.getenv('TARGET_STREAM_FPS', '0'))  # 0=disabled; if
 COLOR_FILTER_ENABLED = os.getenv('COLOR_FILTER_ENABLED', 'false').lower() == 'true'
 DARK_BRIGHTNESS_THRESHOLD = int(os.getenv('DARK_BRIGHTNESS_THRESHOLD', '18'))  # 0..255
 SATURATION_BOOST = float(os.getenv('SATURATION_BOOST', '1.25'))  # 1.0=no change
+
 AMBILIGHT_DNS_TTL_SECONDS = int(os.getenv('AMBILIGHT_DNS_TTL_SECONDS', '3600'))
 AMBILIGHT_DISABLE_DNS_RESOLVE = os.getenv('AMBILIGHT_DISABLE_DNS_RESOLVE', 'false').lower() == 'true'
 AMBILIGHT_DISABLE_PERIODIC_RESYNC = os.getenv('AMBILIGHT_DISABLE_PERIODIC_RESYNC', 'false').lower() == 'true'
@@ -1098,7 +1098,7 @@ class FileBasedAmbilightDaemon:
                 while not shutdown_event.is_set():
                     stats = self.storage.get_extraction_statistics()
                     logger.info(f"📊 Extraction status: {stats['extracted_videos']}/{stats['total_videos']} " +
-                               f"({stats['completion_percentage']:.1f}% complete)")
+                               f"({stats['completion_percentage']:.1f}% complete, {stats['failed_videos']} failed)")
 
                     if stats['pending_videos'] <= 0:
                         logger.info("✅ No pending videos to extract")
@@ -1126,30 +1126,37 @@ class FileBasedAmbilightDaemon:
                             dst_mtime = binary_file.stat().st_mtime if binary_file.exists() else 0
                             if binary_file.exists() and dst_mtime >= src_mtime:
                                 logger.info(f"⏭️  Skipping (up-to-date): {item['name']}")
+                                # Mark as completed if binary exists
+                                self.storage.mark_extraction_completed(item['id'])
                             else:
                                 # Use simplified extractor to create binary file
-                                extract_frames(item['filepath'], item['id'])
+                                success = extract_frames(item['filepath'], item['id'])
 
-                            # Check if extraction was successful by looking for the binary file
-                            data_dir = Path(os.getenv("AMBILIGHT_DATA_DIR", "./data"))
-                            binary_file = data_dir / "binaries" / f"{item['id']}.bin"
+                                if success:
+                                    # Check if extraction was successful by looking for the binary file
+                                    data_dir = Path(os.getenv("AMBILIGHT_DATA_DIR", "./data"))
+                                    binary_file = data_dir / "binaries" / f"{item['id']}.bin"
 
-                            if binary_file.exists():
-                                # Get file size to estimate frame count
-                                file_size = binary_file.stat().st_size
-                                # Estimate frames: (file_size - header_size) / (frame_size + timestamp_size)
-                                header_size = 11  # AMBI(4) + fps(2) + led_count(2) + format(1) + offset(2)
-                                frame_header_size = 10  # timestamp(8) + payload_len(2)
-                                led_count = int(os.getenv("AMBILIGHT_TOP_LED_COUNT", "89")) + int(os.getenv("AMBILIGHT_BOTTOM_LED_COUNT", "89")) + int(os.getenv("AMBILIGHT_LEFT_LED_COUNT", "49")) + int(os.getenv("AMBILIGHT_RIGHT_LED_COUNT", "49"))
-                                bytes_per_led = 4 if os.getenv("AMBILIGHT_RGBW", "false").lower() in ("1", "true", "yes") else 3
-                                frame_payload_size = led_count * bytes_per_led
-                                estimated_frames = (file_size - header_size) // (frame_header_size + frame_payload_size)
+                                    if binary_file.exists():
+                                        # Get file size to estimate frame count
+                                        file_size = binary_file.stat().st_size
+                                        # Estimate frames: (file_size - header_size) / (frame_size + timestamp_size)
+                                        header_size = 11  # AMBI(4) + fps(2) + led_count(2) + format(1) + offset(2)
+                                        frame_header_size = 10  # timestamp(8) + payload_len(2)
+                                        led_count = int(os.getenv("AMBILIGHT_TOP_LED_COUNT", "89")) + int(os.getenv("AMBILIGHT_BOTTOM_LED_COUNT", "89")) + int(os.getenv("AMBILIGHT_LEFT_LED_COUNT", "49")) + int(os.getenv("AMBILIGHT_RIGHT_LED_COUNT", "49"))
+                                        bytes_per_led = 4 if os.getenv("AMBILIGHT_RGBW", "false").lower() in ("1", "true", "yes") else 3
+                                        frame_payload_size = led_count * bytes_per_led
+                                        estimated_frames = (file_size - header_size) // (frame_header_size + frame_payload_size)
 
-                                logger.info(f"✅ Completed: {item['name']} (~{estimated_frames} frames)")
-                            else:
-                                logger.warning(f"⚠️  No binary file created for: {item['name']}")
+                                        logger.info(f"✅ Completed: {item['name']} (~{estimated_frames} frames)")
+                                    else:
+                                        logger.warning(f"⚠️  No binary file created for: {item['name']}")
+                                else:
+                                    logger.error(f"❌ Extraction failed for: {item['name']} (marked as failed, will not retry)")
                         except Exception as e:
-                            logger.error(f"❌ Failed extraction for {item['name']}: {e}")
+                            logger.error(f"❌ Unexpected error during extraction for {item['name']}: {e}")
+                            # Mark as failed to prevent retry
+                            self.storage.mark_extraction_failed(item['id'], f"Unexpected error: {str(e)}")
                     # small pause between batches to yield CPU
                     time.sleep(1)
 
@@ -1173,6 +1180,9 @@ class FileBasedAmbilightDaemon:
         logger.info(f"   Binary files: {storage_info['binary_file_count']}")
         logger.info(f"   Index files: {storage_info['index_file_count']}")
         logger.info(f"   Videos: {stats['extracted_videos']}/{stats['total_videos']} extracted")
+        if stats['failed_videos'] > 0:
+            logger.info(f"   Failed: {stats['failed_videos']} videos (marked as failed, will not retry)")
+        logger.info(f"   Pending: {stats['pending_videos']} videos need extraction")
 
     def start(self):
         """Start the file-based daemon service"""
@@ -1299,6 +1309,7 @@ class FileBasedAmbilightDaemon:
             except Exception as e:
                 logger.error(f"Streaming loop error: {e}")
                 time.sleep(0.1)
+
 
     def _apply_color_filter(self, raw: bytes) -> bytes:
         """Reduce white tint in dark scenes and boost saturation slightly."""

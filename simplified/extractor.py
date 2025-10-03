@@ -7,6 +7,26 @@ import json
 
 import numpy as np
 
+
+def _mark_extraction_failed(jellyfin_item_id, error_message):
+    """Mark extraction as failed in storage system"""
+    try:
+        from storage.storage import FileBasedStorage
+        storage = FileBasedStorage()
+        storage.mark_extraction_failed(jellyfin_item_id, error_message)
+    except Exception as e:
+        print(f"❌ Failed to mark extraction as failed: {e}")
+
+
+def _mark_extraction_completed(jellyfin_item_id):
+    """Mark extraction as completed in storage system"""
+    try:
+        from storage.storage import FileBasedStorage
+        storage = FileBasedStorage()
+        storage.mark_extraction_completed(jellyfin_item_id)
+    except Exception as e:
+        print(f"❌ Failed to mark extraction as completed: {e}")
+
 def _safe_parse_fps_ratio(ratio: str) -> float:
     try:
         if not ratio or ratio == "0/0":
@@ -58,58 +78,90 @@ def _probe_video_fps(video_file: str) -> tuple[float, str]:
 
 
 def extract_frames(video_file, jellyfin_item_id):
-    # --- Load configuration from environment ---
-    fps_env = os.getenv("AMBILIGHT_FPS", "20").strip().lower()
-    fps_max = float(os.getenv("AMBILIGHT_FPS_MAX", "60"))
-    fps_min = float(os.getenv("AMBILIGHT_FPS_MIN", "10"))
-    target_w = int(os.getenv("AMBILIGHT_WIDTH", "89"))
-    target_h = int(os.getenv("AMBILIGHT_HEIGHT", "49"))
-    rgbw = os.getenv("AMBILIGHT_RGBW", "false").lower() in ("1", "true", "yes")
-    offset = int(os.getenv("AMBILIGHT_OFFSET", "46"))   # COUNTER-CLOCKWISE offset semantics
-    data_dir = Path(os.getenv("AMBILIGHT_DATA_DIR", "./data"))
+    """Extract frames from video file with comprehensive error handling"""
+    try:
+        # --- Load configuration from environment ---
+        fps_env = os.getenv("AMBILIGHT_FPS", "20").strip().lower()
+        fps_max = float(os.getenv("AMBILIGHT_FPS_MAX", "60"))
+        fps_min = float(os.getenv("AMBILIGHT_FPS_MIN", "10"))
+        target_w = int(os.getenv("AMBILIGHT_WIDTH", "89"))
+        target_h = int(os.getenv("AMBILIGHT_HEIGHT", "49"))
+        rgbw = os.getenv("AMBILIGHT_RGBW", "false").lower() in ("1", "true", "yes")
+        offset = int(os.getenv("AMBILIGHT_OFFSET", "46"))   # COUNTER-CLOCKWISE offset semantics
+        data_dir = Path(os.getenv("AMBILIGHT_DATA_DIR", "./data"))
 
-    # --- Prepare directories ---
-    binary_dir = data_dir / "binaries"
-    items_dir = data_dir / "items"
-    data_dir.mkdir(parents=True, exist_ok=True)
-    binary_dir.mkdir(parents=True, exist_ok=True)
-    items_dir.mkdir(parents=True, exist_ok=True)
+        # --- Prepare directories ---
+        binary_dir = data_dir / "binaries"
+        items_dir = data_dir / "items"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        binary_dir.mkdir(parents=True, exist_ok=True)
+        items_dir.mkdir(parents=True, exist_ok=True)
 
-    data_file = binary_dir / f"{jellyfin_item_id}.bin"
+        data_file = binary_dir / f"{jellyfin_item_id}.bin"
+    except Exception as e:
+        error_msg = f"Configuration error: {str(e)}"
+        print(f"❌ {error_msg}")
+        _mark_extraction_failed(jellyfin_item_id, error_msg)
+        return False
+
+    # Check if video file exists and is readable
+    if not os.path.exists(video_file):
+        error_msg = f"Video file does not exist: {video_file}"
+        print(f"❌ {error_msg}")
+        _mark_extraction_failed(jellyfin_item_id, error_msg)
+        return False
+
+    if not os.access(video_file, os.R_OK):
+        error_msg = f"Video file is not readable: {video_file}"
+        print(f"❌ {error_msg}")
+        _mark_extraction_failed(jellyfin_item_id, error_msg)
+        return False
 
     # Decide FPS
-    if fps_env == "auto":
-        src_fps_float, src_fps_expr = _probe_video_fps(video_file)
-        # Clamp within bounds
-        chosen_fps_float = max(fps_min, min(fps_max, src_fps_float))
-        # If clamped changes value, use float value; else preserve source expression
-        if abs(chosen_fps_float - src_fps_float) < 1e-3:
-            fps_expr = src_fps_expr  # keep rational if provided
+    try:
+        if fps_env == "auto":
+            src_fps_float, src_fps_expr = _probe_video_fps(video_file)
+            # Clamp within bounds
+            chosen_fps_float = max(fps_min, min(fps_max, src_fps_float))
+            # If clamped changes value, use float value; else preserve source expression
+            if abs(chosen_fps_float - src_fps_float) < 1e-3:
+                fps_expr = src_fps_expr  # keep rational if provided
+            else:
+                fps_expr = f"{chosen_fps_float}"
+            header_fps = int(round(chosen_fps_float))
+            print(f"🎬 Extracting {video_file} ({jellyfin_item_id})")
+            print(f"⚙️ Resolution: {target_w}x{target_h}, FPS: auto→{chosen_fps_float:.3f} (expr {fps_expr}), Offset: {offset} (CCW), RGBW: {rgbw}")
         else:
+            # Fixed FPS from env
+            try:
+                chosen_fps_float = float(fps_env)
+            except Exception:
+                chosen_fps_float = 20.0
+            chosen_fps_float = max(fps_min, min(fps_max, chosen_fps_float))
             fps_expr = f"{chosen_fps_float}"
-        header_fps = int(round(chosen_fps_float))
-        print(f"🎬 Extracting {video_file} ({jellyfin_item_id})")
-        print(f"⚙️ Resolution: {target_w}x{target_h}, FPS: auto→{chosen_fps_float:.3f} (expr {fps_expr}), Offset: {offset} (CCW), RGBW: {rgbw}")
-    else:
-        # Fixed FPS from env
-        try:
-            chosen_fps_float = float(fps_env)
-        except Exception:
-            chosen_fps_float = 20.0
-        chosen_fps_float = max(fps_min, min(fps_max, chosen_fps_float))
-        fps_expr = f"{chosen_fps_float}"
-        header_fps = int(round(chosen_fps_float))
-        print(f"🎬 Extracting {video_file} ({jellyfin_item_id})")
-        print(f"⚙️ Resolution: {target_w}x{target_h}, FPS: {chosen_fps_float:.3f}, Offset: {offset} (CCW), RGBW: {rgbw}")
+            header_fps = int(round(chosen_fps_float))
+            print(f"🎬 Extracting {video_file} ({jellyfin_item_id})")
+            print(f"⚙️ Resolution: {target_w}x{target_h}, FPS: {chosen_fps_float:.3f}, Offset: {offset} (CCW), RGBW: {rgbw}")
+    except Exception as e:
+        error_msg = f"FPS detection failed: {str(e)}"
+        print(f"❌ {error_msg}")
+        _mark_extraction_failed(jellyfin_item_id, error_msg)
+        return False
 
     # --- Start FFmpeg process (stream raw RGB24 frames) ---
-    cmd = [
-        "ffmpeg", "-hide_banner", "-loglevel", "error",
-        "-i", video_file,
-        "-vf", f"fps={fps_expr},scale={target_w}:{target_h}",
-        "-f", "rawvideo", "-pix_fmt", "rgb24", "-"
-    ]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=10**8)
+    try:
+        cmd = [
+            "ffmpeg", "-hide_banner", "-loglevel", "error",
+            "-i", video_file,
+            "-vf", f"fps={fps_expr},scale={target_w}:{target_h}",
+            "-f", "rawvideo", "-pix_fmt", "rgb24", "-"
+        ]
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=10**8)
+    except Exception as e:
+        error_msg = f"Failed to start ffmpeg process: {str(e)}"
+        print(f"❌ {error_msg}")
+        _mark_extraction_failed(jellyfin_item_id, error_msg)
+        return False
 
     frame_size = target_w * target_h * 3  # RGB24 = 3 bytes per pixel
     border_data = io.BytesIO()
@@ -130,6 +182,19 @@ def extract_frames(video_file, jellyfin_item_id):
 
     try:
         while True:
+            # Check if ffmpeg process is still alive
+            if proc.poll() is not None:
+                # Process has terminated, check for errors
+                stderr_output = proc.stderr.read().decode('utf-8', errors='ignore')
+                if stderr_output:
+                    error_msg = f"FFmpeg process terminated with error: {stderr_output.strip()}"
+                    print(f"❌ {error_msg}")
+                    _mark_extraction_failed(jellyfin_item_id, error_msg)
+                    return False
+                else:
+                    # Process ended normally (EOF)
+                    break
+
             # --- robust read: ensure we get exactly frame_size bytes ---
             buf = bytearray()
             to_read = frame_size
@@ -193,7 +258,10 @@ def extract_frames(video_file, jellyfin_item_id):
             expected_payload_len = led_count * bytes_per_led
             if len(payload) != expected_payload_len:
                 # If mismatch, raise — better to catch mistakes early
-                raise RuntimeError(f"Payload length mismatch: got {len(payload)} expected {expected_payload_len}")
+                error_msg = f"Payload length mismatch: got {len(payload)} expected {expected_payload_len}"
+                print(f"❌ {error_msg}")
+                _mark_extraction_failed(jellyfin_item_id, error_msg)
+                return False
 
             border_data.write(struct.pack("<dH", timestamp, len(payload)))  # timestamp (double), payload_len (uint16)
             border_data.write(payload)
@@ -205,16 +273,41 @@ def extract_frames(video_file, jellyfin_item_id):
             if extracted_frames % 100 == 0:
                 print(f"Processed {extracted_frames} frames...")
 
+    except Exception as e:
+        error_msg = f"Frame extraction error: {str(e)}"
+        print(f"❌ {error_msg}")
+        _mark_extraction_failed(jellyfin_item_id, error_msg)
+        return False
     finally:
         # clean up ffmpeg
         try:
             proc.stdout.close()
         except Exception:
             pass
+        try:
+            proc.stderr.close()
+        except Exception:
+            pass
         proc.wait()
 
-    # --- Write final binary to disk ---
-    with open(data_file, "wb") as f:
-        f.write(border_data.getbuffer())
+    # Check if we got any frames
+    if extracted_frames == 0:
+        error_msg = "No frames extracted from video"
+        print(f"❌ {error_msg}")
+        _mark_extraction_failed(jellyfin_item_id, error_msg)
+        return False
 
-    print(f"✅ Extraction complete: {data_file} ({extracted_frames} frames, {led_count} LEDs)")
+    # --- Write final binary to disk ---
+    try:
+        with open(data_file, "wb") as f:
+            f.write(border_data.getbuffer())
+
+        # Mark extraction as completed
+        _mark_extraction_completed(jellyfin_item_id)
+        print(f"✅ Extraction complete: {data_file} ({extracted_frames} frames, {led_count} LEDs)")
+        return True
+    except Exception as e:
+        error_msg = f"Failed to write binary file: {str(e)}"
+        print(f"❌ {error_msg}")
+        _mark_extraction_failed(jellyfin_item_id, error_msg)
+        return False

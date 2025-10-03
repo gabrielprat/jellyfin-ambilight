@@ -15,7 +15,7 @@ import json
 import struct
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from datetime import datetime
 
 # Configuration
@@ -67,7 +67,10 @@ class OptimizedFileBasedStorage:
             'filepath': filepath,
             'jellyfin_date_created': jellyfin_date_created,  # When item was added to Jellyfin library
             'created_at': datetime.now().isoformat(),        # When we retrieved it via API
-            'updated_at': datetime.now().isoformat()         # When we last updated it
+            'updated_at': datetime.now().isoformat(),        # When we last updated it
+            'extraction_status': 'pending',                  # pending, completed, failed
+            'extraction_error': None,                        # Error message if extraction failed
+            'extraction_attempts': 0                         # Number of extraction attempts
         }
         item_file = self.items_dir / f"{item_id}.json"
         action = "updated" if item_file.exists() else "added"
@@ -239,8 +242,49 @@ class OptimizedFileBasedStorage:
         # No metadata index anymore
         return False
 
+    def mark_extraction_failed(self, item_id: str, error_message: str):
+        """Mark an item as failed extraction to prevent retry"""
+        item_file = self.items_dir / f"{item_id}.json"
+        if not item_file.exists():
+            return
+
+        try:
+            with open(item_file, 'r') as f:
+                item_data = json.load(f)
+
+            item_data['extraction_status'] = 'failed'
+            item_data['extraction_error'] = error_message
+            item_data['extraction_attempts'] = item_data.get('extraction_attempts', 0) + 1
+            item_data['updated_at'] = datetime.now().isoformat()
+
+            with open(item_file, 'w') as f:
+                json.dump(item_data, f, indent=2)
+
+            print(f"❌ Marked {item_data.get('name', item_id)} as failed: {error_message}")
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"❌ Failed to mark {item_id} as failed: {e}")
+
+    def mark_extraction_completed(self, item_id: str):
+        """Mark an item as successfully extracted"""
+        item_file = self.items_dir / f"{item_id}.json"
+        if not item_file.exists():
+            return
+
+        try:
+            with open(item_file, 'r') as f:
+                item_data = json.load(f)
+
+            item_data['extraction_status'] = 'completed'
+            item_data['extraction_error'] = None
+            item_data['updated_at'] = datetime.now().isoformat()
+
+            with open(item_file, 'w') as f:
+                json.dump(item_data, f, indent=2)
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"❌ Failed to mark {item_id} as completed: {e}")
+
     def get_videos_needing_extraction(self, priority_order: str = 'newest_first', limit: int = None) -> List[Dict]:
-        """Get videos that need frame extraction"""
+        """Get videos that need frame extraction (excluding failed ones)"""
         print("Getting videos needing extraction...")
         videos_needing_extraction = []
 
@@ -261,6 +305,10 @@ class OptimizedFileBasedStorage:
                 # Skip if video file doesn't exist (no data creation, just ignore)
                 if not os.path.exists(filepath):
                     continue  # Simply skip missing files completely
+
+                # Skip if extraction has already failed
+                if item_data.get('extraction_status') == 'failed':
+                    continue
 
                 # Check if binary exists
                 bin_file = self.binaries_dir / f"{item_data['id']}.bin"
@@ -290,6 +338,7 @@ class OptimizedFileBasedStorage:
         print("Getting extraction statistics...")
         total_videos = 0
         extracted_videos = 0
+        failed_videos = 0
         for item_file in self.items_dir.glob("*.json"):
             try:
                 with open(item_file, 'r') as f:
@@ -299,20 +348,26 @@ class OptimizedFileBasedStorage:
                     if filepath and filepath not in ['Unknown', ''] and os.path.exists(filepath):
                         total_videos += 1
 
-                        # Check if binary exists
-                        bin_file = self.binaries_dir / f"{item_data['id']}.bin"
-                        if bin_file.exists():
-                            extracted_videos += 1
+                        # Check extraction status
+                        extraction_status = item_data.get('extraction_status', 'pending')
+                        if extraction_status == 'failed':
+                            failed_videos += 1
+                        else:
+                            # Check if binary exists
+                            bin_file = self.binaries_dir / f"{item_data['id']}.bin"
+                            if bin_file.exists():
+                                extracted_videos += 1
 
             except (json.JSONDecodeError, IOError):
                 continue
 
         completion_percentage = (extracted_videos / total_videos * 100) if total_videos > 0 else 0
-        pending_videos = total_videos - extracted_videos
+        pending_videos = total_videos - extracted_videos - failed_videos
 
         return {
             'total_videos': total_videos,
             'extracted_videos': extracted_videos,
+            'failed_videos': failed_videos,
             'pending_videos': pending_videos,
             'completion_percentage': completion_percentage
         }
@@ -420,7 +475,7 @@ class UDPWriteSession:
             print(f"💾 Writing {len(self.memory_buffer):,} bytes to {self.udp_file.name}...")
             with open(self.udp_file, 'wb') as f:
                 f.write(self.memory_buffer)
-            print(f"✅ Single write operation completed!")
+            print("✅ Single write operation completed!")
 
         # Save metadata with timestamps
         metadata = {

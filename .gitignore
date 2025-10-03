@@ -1,0 +1,5 @@
+!.gitignore
+data/movies
+data/tv
+data/docker-data/*
+
