@@ -22,35 +22,8 @@ AMBILIGHT_MAX_CATCHUP_LAG_SECONDS = float(os.getenv("AMBILIGHT_MAX_CATCHUP_LAG_S
 AMBILIGHT_CATCHUP_MODE = os.getenv("AMBILIGHT_CATCHUP_MODE", "last_only").lower()  # last_only | burst
 AMBILIGHT_MAX_BURST_FRAMES = int(os.getenv("AMBILIGHT_MAX_BURST_FRAMES", "10"))
 
-# Gamma correction configuration (like Hyperion.ng)
-GAMMA_RED = float(os.getenv('GAMMA_RED', '1.0'))      # 1.0=neutral, >1.0=reduces red, <1.0=adds red
-GAMMA_GREEN = float(os.getenv('GAMMA_GREEN', '1.0'))  # 1.0=neutral, >1.0=reduces green, <1.0=adds green
-GAMMA_BLUE = float(os.getenv('GAMMA_BLUE', '1.0'))    # 1.0=neutral, >1.0=reduces blue, <1.0=adds blue
-GAMMA_CORRECTION_ENABLED = (GAMMA_RED != 1.0 or GAMMA_GREEN != 1.0 or GAMMA_BLUE != 1.0)
 
 logger = logging.getLogger(__name__)
-
-def _apply_gamma_correction(raw: bytes) -> bytes:
-    """Apply gamma correction to RGB values (like Hyperion.ng)."""
-    if not GAMMA_CORRECTION_ENABLED:
-        return raw
-
-    data = bytearray(raw)
-    for i in range(0, len(data), 3):
-        r = data[i] / 255.0
-        g = data[i+1] / 255.0
-        b = data[i+2] / 255.0
-
-        # Apply gamma correction: value^gamma
-        r_corrected = pow(r, GAMMA_RED)
-        g_corrected = pow(g, GAMMA_GREEN)
-        b_corrected = pow(b, GAMMA_BLUE)
-
-        # Convert back to 0-255 range
-        data[i] = max(0, min(255, int(r_corrected * 255)))
-        data[i+1] = max(0, min(255, int(g_corrected * 255)))
-        data[i+2] = max(0, min(255, int(b_corrected * 255)))
-    return bytes(data)
 
 def read_header(f):
     magic = f.read(4)
@@ -170,6 +143,7 @@ class AmbilightBroadcaster:
 
     def _build_index(self):
         self._index.clear()
+
         # After header, frames repeat: [timestamp:double][len:uint16][payload:bytes]
         while True:
             header = self._f.read(10)
@@ -178,19 +152,7 @@ class AmbilightBroadcaster:
             ts, payload_len = struct.unpack("<dH", header)
             payload_offset = self._f.tell()
 
-            # Read payload and apply gamma correction if enabled
-            if GAMMA_CORRECTION_ENABLED:
-                payload = self._f.read(payload_len)
-                if payload:
-                    corrected_payload = _apply_gamma_correction(payload)
-                    # Write corrected payload back to file (in-place)
-                    current_pos = self._f.tell()
-                    self._f.seek(payload_offset)
-                    self._f.write(corrected_payload)
-                    self._f.seek(current_pos)
-            else:
-                # Skip payload without processing
-                self._f.seek(payload_len, 1)
+            self._f.seek(payload_len, 1)
 
             self._index.append((ts, payload_offset, payload_len))
 
@@ -200,8 +162,6 @@ class AmbilightBroadcaster:
                 return
             self._f = open(self.filename, "rb")
             self._read_header()
-            if GAMMA_CORRECTION_ENABLED:
-                logger.info(f"🎨 Applying gamma correction: R={GAMMA_RED}, G={GAMMA_GREEN}, B={GAMMA_BLUE}")
             self._build_index()
 
     def _ensure_socket(self):
@@ -366,9 +326,12 @@ class AmbilightBroadcaster:
                                 self._current_index = target_index
                                 _, payload_offset, payload_len = self._index[self._current_index]
                                 t_read0 = time.time()
+
+                                # Read payload from file
                                 self._f.seek(payload_offset)
                                 payload = self._f.read(payload_len)
                                 t_read1 = time.time()
+
                                 if payload:
                                     self._resolve_host_if_needed()
                                     target = self._resolved_ip or self._host
@@ -389,9 +352,12 @@ class AmbilightBroadcaster:
                                    and frames_sent_this_cycle < max_frames):
                                 _, payload_offset, payload_len = self._index[self._current_index]
                                 t_read0 = time.time()
+
+                                # Read payload from file
                                 self._f.seek(payload_offset)
                                 payload = self._f.read(payload_len)
                                 t_read1 = time.time()
+
                                 if payload:
                                     # Resolve periodically
                                     self._resolve_host_if_needed()
@@ -403,6 +369,7 @@ class AmbilightBroadcaster:
                                     self._frames_sent += 1
                                     self._cumulative_read_s += (t_read1 - t_read0)
                                     self._cumulative_send_s += (t_send1 - t_send0)
+
                                 self._current_index += 1
                                 frames_sent_this_cycle += 1
                         # Choose a small sleep to maintain responsiveness
