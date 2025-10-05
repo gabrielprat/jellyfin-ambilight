@@ -25,19 +25,6 @@ AMBILIGHT_MAX_BURST_FRAMES = int(os.getenv("AMBILIGHT_MAX_BURST_FRAMES", "10"))
 
 logger = logging.getLogger(__name__)
 
-def read_header(f):
-    magic = f.read(4)
-    if magic != b"AMBI":
-        raise ValueError("Invalid file format")
-
-    fps = struct.unpack("<H", f.read(2))[0]
-    led_count = struct.unpack("<H", f.read(2))[0]
-    fmt = struct.unpack("<B", f.read(1))[0]
-    offset = struct.unpack("<H", f.read(2))[0]
-    rgbw = (fmt == 1)
-
-    return fps, led_count, rgbw, offset
-
 def get_wled_state():
     try:
         resp = requests.get(f"http://{WLED_HOST}/json/state", timeout=3)
@@ -54,47 +41,6 @@ def restore_wled_state(state):
             print("✅ Restored previous WLED state.")
         except Exception as e:
             print("⚠️ Could not restore WLED state:", e)
-
-def play_and_broadcast(filename):
-    with open(filename, "rb") as f:
-        fps, led_count, rgbw, offset = read_header(f)
-        print(f"🎬 Ambilight stream: {filename}")
-        print(f"FPS: {fps}, LEDs: {led_count}, RGBW: {rgbw}, Offset: {offset}")
-        print(f"🎯 Broadcasting to {WLED_HOST}:{WLED_PORT}\n")
-
-        prev_state = get_wled_state()
-        if prev_state:
-            print("💾 Saved current WLED state.")
-        else:
-            print("⚠️ Could not read WLED state, continuing anyway...")
-
-        # Turn on WLED if off
-        try:
-            requests.post(f"http://{WLED_HOST}/json/state", json={"on": True}, timeout=3)
-        except Exception:
-            pass
-
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-        try:
-            while True:
-                header = f.read(10)
-                if not header:
-                    break
-
-                timestamp, payload_len = struct.unpack("<dH", header)
-                payload = f.read(payload_len)
-
-                # Send frame via UDP (raw DRGB/DRGBW format)
-                sock.sendto(payload, (WLED_HOST, WLED_PORT))
-
-                time.sleep(1 / fps)
-
-        except KeyboardInterrupt:
-            print("\n⏹️ Stopped by user.")
-        finally:
-            sock.close()
-            restore_wled_state(prev_state)
 
 
 class AmbilightBroadcaster:
@@ -499,12 +445,4 @@ def sync_broadcast_to(broadcaster: AmbilightBroadcaster, video_seconds: float, s
     broadcaster.sync_to(video_seconds, source_wall_ts)
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description="Ambilight UDP Broadcaster for WLED")
-    parser.add_argument("file", help="Path to ambilight.bin file")
-    args = parser.parse_args()
-
-    try:
-        play_and_broadcast(args.file)
-    except KeyboardInterrupt:
-        print("\nExiting...")
+    print("This module is intended to be used via the broadcaster API, not as a CLI.")
