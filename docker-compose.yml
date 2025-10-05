@@ -12,43 +12,6 @@ services:
       - .env
 
     environment:
-      # Jellyfin Configuration (REQUIRED)
-      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:-9b53498f4e1b4325a420fd705fea0020}
-      - JELLYFIN_BASE_URL=${JELLYFIN_BASE_URL:-https://jellyfin.galagaon.com}
-
-      # Network resilience (sync-first approach)
-      - UDP_SKIP_ON_BUSY=${UDP_SKIP_ON_BUSY:-true}
-
-      # Device-WLED Pairing (Multi-room setup)
-      - DEVICE_MATCH_FIELD=${DEVICE_MATCH_FIELD:-DeviceName}
-      # Example device mappings (uncomment and configure as needed):
-      # - WLED_DEVICE_LIVING_ROOM=wled-livingroom.lan:21324
-      # - WLED_DEVICE_BEDROOM=wled-bedroom.lan:21324
-      # - WLED_DEVICE_OFFICE=wled-office.lan:21324
-
-      # LED Configuration
-      - AMBILIGHT_TOP_LED_COUNT=${AMBILIGHT_TOP_LED_COUNT:-89}
-      - AMBILIGHT_BOTTOM_LED_COUNT=${AMBILIGHT_BOTTOM_LED_COUNT:-89}
-      - AMBILIGHT_LEFT_LED_COUNT=${AMBILIGHT_LEFT_LED_COUNT:-49}
-      - AMBILIGHT_RIGHT_LED_COUNT=${AMBILIGHT_RIGHT_LED_COUNT:-49}
-      - AMBILIGHT_INPUT_POSITION=${AMBILIGHT_INPUT_POSITION:-46}
-
-      # Frame Extraction Settings
-      - FRAMES_PER_SECOND=${FRAMES_PER_SECOND:-10}
-      - EXTRACTION_PRIORITY=${EXTRACTION_PRIORITY:-newest_first}
-      - EXTRACTION_BATCH_SIZE=${EXTRACTION_BATCH_SIZE:-5}
-      - BLACK_BORDER_DETECTION=${BLACK_BORDER_DETECTION:-false}
-      - BORDER_THRESHOLD=${BORDER_THRESHOLD:-10}
-
-      # Service Intervals
-      - LIBRARY_SCAN_INTERVAL=${LIBRARY_SCAN_INTERVAL:-1800}
-      - PLAYBACK_MONITOR_INTERVAL=${PLAYBACK_MONITOR_INTERVAL:-0.05}
-      - ENABLE_EXTRACTION=${ENABLE_EXTRACTION:-true}
-
-      - AMBILIGHT_DATA_DIR=${AMBILIGHT_DATA_DIR:-/app/data/ambilight}
-
-      # Logging
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - PYTHONUNBUFFERED=1
 
     volumes:
@@ -79,15 +42,6 @@ services:
     dns_opt:
       - timeout:2
       - attempts:3
-
-    # Extra hosts for local resolution (optional)
-    # extra_hosts:
-    #   - "jellyfin.galagaon.com:${JELLYFIN_LOCAL_IP:-192.168.1.191}"
-
-    labels:
-      - "com.jellyfin.ambilight.type=simplified-alpine"
-      - "com.jellyfin.ambilight.size=181MB"
-      - "com.jellyfin.ambilight.description=10x smaller than original Debian setup"
 
 networks:
   homelab-network:
