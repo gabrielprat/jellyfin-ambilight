@@ -17,7 +17,7 @@ def _compute_led_zones(frame_shape, counts, border_fraction):
 
     zones = []
 
-    # Right: top → bottom
+    # Right: top → bottom (starts at top-right)
     for i in range(right_count):
         y1 = int(i * h / right_count)
         y2 = int((i + 1) * h / right_count)
@@ -35,7 +35,7 @@ def _compute_led_zones(frame_shape, counts, border_fraction):
         y1 = int(h - (i + 1) * h / left_count)
         zones.append((0, y1, left_w, y2))
 
-    # Top: left → right
+    # Top: left → right (finishes back near top-right)
     for i in range(top_count):
         x1 = int(i * w / top_count)
         x2 = int((i + 1) * w / top_count)
@@ -48,9 +48,9 @@ def _extract_led_colors_bgr(frame, zones):
     for (x1, y1, x2, y2) in zones:
         region = frame[y1:y2, x1:x2]
         if region.size == 0:
-            colors.append((0,0,0))
+            colors.append((0, 0, 0))
         else:
-            avg = region.mean(axis=(0,1))  # BGR
+            avg = region.mean(axis=(0, 1))  # BGR
             colors.append((int(avg[0]), int(avg[1]), int(avg[2])))
     return colors
 
@@ -60,54 +60,63 @@ def extract_video_to_binary(video_file, output_file, top=89, bottom=89, left=49,
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open video {video_file}")
 
-    # Use native video FPS
-    fps_f = cap.get(cv2.CAP_PROP_FPS)
-    fps = int(round(fps_f)) if fps_f and fps_f > 0 else 30
+    try:
+        # Use native video FPS
+        fps_f = cap.get(cv2.CAP_PROP_FPS)
+        fps = int(round(fps_f)) if fps_f and fps_f > 0 else 30
 
-    ret, first = cap.read()
-    if not ret:
-        raise RuntimeError("Cannot read first frame")
-
-    counts = (top, bottom, left, right)
-    zones = _compute_led_zones(first.shape, counts, border_fraction)
-    led_count = len(zones)
-    fmt_byte = 1 if rgbw else 0
-
-    # Build binary in memory
-    data = bytearray()
-    data += struct.pack("<4sHHBH", b"AMBI", fps, led_count, fmt_byte, offset % max(1, led_count))
-
-    frame_idx = 0
-    while True:
-        ret, frame = cap.read()
+        ret, first = cap.read()
         if not ret:
-            break
+            raise RuntimeError("Cannot read first frame")
 
-        ts_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
-        ts_us = int(ts_ms * 1000)
-        data += struct.pack("<Q", ts_us)
+        counts = (top, bottom, left, right)
+        zones = _compute_led_zones(first.shape, counts, border_fraction)
+        led_count = len(zones)
+        fmt_byte = 1 if rgbw else 0
 
-        # Extract colors and apply offset
-        bgr_colors = _extract_led_colors_bgr(frame, zones)
-        if offset:
-            bgr_colors = bgr_colors[offset:] + bgr_colors[:offset]
+        safe_led_count = max(1, led_count)
+        offset_mod = offset % safe_led_count
 
-        if rgbw:
-            for (b, g, r) in bgr_colors:
-                data += struct.pack("BBBB", r, g, b, 0)
-        else:
-            for (b, g, r) in bgr_colors:
-                data += struct.pack("BBB", r, g, b)
+        # Build binary in memory
+        data = bytearray()
+        data += struct.pack("<4sHHBH", b"AMBI", fps, led_count, fmt_byte, offset_mod)
 
-        frame_idx += 1
-        if frame_idx % 100 == 0:
-            print(f"Processed {frame_idx} frames...", end="\r")
+        frame_idx = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
 
-    with open(output_file, "wb") as f:
-        f.write(data)
+            ts_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
+            ts_us = int(ts_ms * 1000)
+            data += struct.pack("<Q", ts_us)
 
-    print(f"\n✅ Done! Saved to '{output_file}' ({frame_idx} frames, FPS={fps})")
-    cap.release()
+            # Extract colors in clockwise order starting at top-right
+            bgr_colors = _extract_led_colors_bgr(frame, zones)
+
+            # Apply offset as COUNTER-CLOCKWISE rotation:
+            # offset = 46 means the physical first LED is 46 LEDs to the left of top-right,
+            # therefore we move the last `offset` elements to the front.
+            if offset_mod:
+                bgr_colors = bgr_colors[-offset_mod:] + bgr_colors[:-offset_mod]
+
+            if rgbw:
+                for (b, g, r) in bgr_colors:
+                    data += struct.pack("BBBB", r & 0xFF, g & 0xFF, b & 0xFF, 0)
+            else:
+                for (b, g, r) in bgr_colors:
+                    data += struct.pack("BBB", r & 0xFF, g & 0xFF, b & 0xFF)
+
+            frame_idx += 1
+            if frame_idx % 100 == 0:
+                print(f"Processed {frame_idx} frames...", end="\r")
+
+        with open(output_file, "wb") as f:
+            f.write(data)
+
+        print(f"\n✅ Done! Saved to '{output_file}' ({frame_idx} frames, FPS={fps})")
+    finally:
+        cap.release()
 
 
 # --- Daemon integration wrapper ---
