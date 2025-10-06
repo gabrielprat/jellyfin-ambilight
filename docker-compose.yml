@@ -1,13 +1,12 @@
 services:
-  jellyfin-ambilight:
+  ambilight-extractor:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: jellyfin-ambilight
-    hostname: jellyfin-ambilight
+    container_name: ambilight-extractor
+    hostname: ambilight-extractor
     restart: unless-stopped
 
-    # Load environment variables from .env and pass them into the container
     env_file:
       - .env
 
@@ -15,30 +14,53 @@ services:
       - PYTHONUNBUFFERED=1
 
     volumes:
-      # Source code mount (for development)
       - ./:/app/src:ro
-
-      # Data persistence
       - ${DATA_PATH:-./data}:/app/data
-
-      # Media access (READ-ONLY)
       - ${MOVIES_PATH:-./test-media/movies}:/media/movies:ro
       - ${TV_PATH:-./test-media/tv}:/media/tv:ro
 
-    # Minimal resource usage
-    # Removed deploy resource limits to avoid cgroup warnings on non-supporting kernels
+    command: python3 -u /app/src/ambilight-daemon-extractor.py
 
-    # Use custom homelab network with static IP
     networks:
       homelab-network:
 
-    # DNS configuration for homelab - multiple fallbacks for reliability
     dns:
-      - 192.168.1.191  # Primary homelab DNS
-      - 1.1.1.1        # Cloudflare DNS (fallback)
-      - 8.8.8.8        # Google DNS (fallback)
+      - 192.168.1.191
+      - 1.1.1.1
+      - 8.8.8.8
 
-    # Additional DNS options for reliability
+    dns_opt:
+      - timeout:2
+      - attempts:3
+
+  ambilight-player:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ambilight-player
+    hostname: ambilight-player
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    environment:
+      - PYTHONUNBUFFERED=1
+
+    volumes:
+      - ./:/app/src:ro
+      - ${DATA_PATH:-./data}:/app/data
+
+    command: python3 -u /app/src/ambilight-daemon-player.py
+
+    networks:
+      homelab-network:
+
+    dns:
+      - 192.168.1.191
+      - 1.1.1.1
+      - 8.8.8.8
+
     dns_opt:
       - timeout:2
       - attempts:3

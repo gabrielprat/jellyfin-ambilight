@@ -1,0 +1,253 @@
+#!/usr/bin/env python3
+"""
+Ambilight Player Daemon (UDP)
+=============================
+
+Monitors Jellyfin sessions and plays AMBI binaries via UDP using
+simplified/ambilight_play.py.
+"""
+
+import os
+import sys
+import time
+import threading
+import socket
+import signal
+import logging
+import requests
+from urllib.parse import urlparse
+from datetime import datetime
+from pathlib import Path
+from typing import Dict
+
+# Local paths
+sys.path.append('/app')
+sys.path.append('/app/storage')
+
+from storage.storage import FileBasedStorage  # noqa: E402
+from simplified.ambilight_play import AmbilightBinaryPlayer  # noqa: E402
+
+
+JELLYFIN_API_KEY = os.getenv("JELLYFIN_API_KEY")
+JELLYFIN_BASE_URL = os.getenv("JELLYFIN_BASE_URL")
+WLED_HOST = os.getenv('WLED_HOST', 'wled-ambilight-lgc1.lan')
+WLED_UDP_RAW_PORT = int(os.getenv('WLED_UDP_RAW_PORT', '19446'))
+AMBILIGHT_DATA_DIR = os.getenv("AMBILIGHT_DATA_DIR", "/app/data/ambilight")
+PLAYBACK_MONITOR_INTERVAL = float(os.getenv('PLAYBACK_MONITOR_INTERVAL', '0.2'))
+AMBILIGHT_DNS_TTL_SECONDS = int(os.getenv('AMBILIGHT_DNS_TTL_SECONDS', '3600'))
+AMBILIGHT_DISABLE_DNS_RESOLVE = os.getenv('AMBILIGHT_DISABLE_DNS_RESOLVE', 'false').lower() == 'true'
+
+shutdown_event = threading.Event()
+logger = logging.getLogger(__name__)
+
+
+class PlayerDaemon:
+    def __init__(self):
+        self.storage = FileBasedStorage(AMBILIGHT_DATA_DIR)
+        self._jellyfin_parsed = urlparse(JELLYFIN_BASE_URL) if JELLYFIN_BASE_URL else None
+        self._jellyfin_resolved_ip = None
+        self._jellyfin_last_resolve_ts = 0.0
+        self._wled_resolved_ip = None
+        self._wled_last_resolve_ts = 0.0
+        self._players: Dict[str, AmbilightBinaryPlayer] = {}
+        self._threads: Dict[str, threading.Thread] = {}
+        self._session_state: Dict[str, Dict] = {}
+
+    # DNS helpers
+    def _resolve_host_cached(self, host: str, udp: bool = False) -> str | None:
+        if AMBILIGHT_DISABLE_DNS_RESOLVE:
+            return None
+        family = socket.AF_INET
+        typ = socket.SOCK_DGRAM if udp else socket.SOCK_STREAM
+        ttl = AMBILIGHT_DNS_TTL_SECONDS
+        now = time.time()
+        cache_ip = self._wled_resolved_ip if udp else self._jellyfin_resolved_ip
+        cache_ts = self._wled_last_resolve_ts if udp else self._jellyfin_last_resolve_ts
+        if ttl != 0 and cache_ip and (now - cache_ts) < ttl:
+            return cache_ip
+        try:
+            infos = socket.getaddrinfo(host, None, family=family, type=typ)
+            if infos:
+                ip = infos[0][4][0]
+                if udp:
+                    self._wled_resolved_ip = ip
+                    self._wled_last_resolve_ts = now
+                else:
+                    self._jellyfin_resolved_ip = ip
+                    self._jellyfin_last_resolve_ts = now
+                return ip
+        except Exception as e:
+            logger.warning(f"DNS resolve failed for {host}: {e}")
+        return None
+
+    def _jellyfin_base(self) -> tuple[str, dict]:
+        if not self._jellyfin_parsed:
+            return JELLYFIN_BASE_URL, {}
+        ip = self._resolve_host_cached(self._jellyfin_parsed.hostname, udp=False)
+        host = ip or self._jellyfin_parsed.hostname
+        port = f":{self._jellyfin_parsed.port}" if self._jellyfin_parsed.port else ''
+        base = f"{self._jellyfin_parsed.scheme}://{host}{port}"
+        return base, {"Host": self._jellyfin_parsed.netloc}
+
+    def _wled_target(self) -> tuple[str, int]:
+        ip = self._resolve_host_cached(WLED_HOST, udp=True)
+        return (ip or WLED_HOST, WLED_UDP_RAW_PORT)
+
+    def get_sessions(self):
+        try:
+            base, host_header = self._jellyfin_base()
+            headers = {
+                "Authorization": f'MediaBrowser Client="ambilight-player", Device="Python", DeviceId="ambilight-player-001", Version="1.0", Token="{JELLYFIN_API_KEY}"'
+            }
+            headers.update(host_header)
+            r = requests.get(f"{base}/Sessions", headers=headers, timeout=5)
+            r.raise_for_status()
+            sessions = r.json()
+            videos = []
+            for s in sessions:
+                now_playing = s.get("NowPlayingItem")
+                if now_playing and now_playing.get("Type") in ["Movie", "Episode", "Video"]:
+                    videos.append(s)
+            return videos
+        except Exception as e:
+            logger.error(f"get_sessions failed: {e}")
+            return []
+
+    def _start_player(self, session_id: str, binary_file: Path, host: str, port: int, start_seconds: float):
+        p = AmbilightBinaryPlayer(str(binary_file), host=host, port=port)
+        self._players[session_id] = p
+        t = threading.Thread(target=p.play, kwargs={"start_time": start_seconds}, daemon=True)
+        self._threads[session_id] = t
+        t.start()
+
+    def _stop_player(self, session_id: str):
+        p = self._players.pop(session_id, None)
+        t = self._threads.pop(session_id, None)
+        if p:
+            try:
+                p.stop()
+            except Exception:
+                pass
+        if t:
+            try:
+                t.join(timeout=1.0)
+            except Exception:
+                pass
+
+    def _pause_player(self, session_id: str):
+        p = self._players.get(session_id)
+        if p:
+            try:
+                p.pause()
+            except Exception:
+                pass
+
+    def _resume_player(self, session_id: str):
+        p = self._players.get(session_id)
+        if p:
+            try:
+                p.resume()
+            except Exception:
+                pass
+
+    def _resync_player(self, session_id: str, position_seconds: float):
+        p = self._players.get(session_id)
+        if p:
+            try:
+                p.resync(position_seconds)
+            except Exception:
+                pass
+
+    def monitor(self):
+        logger.info("🎬 Starting player monitoring...")
+        while not shutdown_event.is_set():
+            try:
+                sessions = self.get_sessions()
+                if sessions:
+                    for s in sessions:
+                        sid = s["Id"]
+                        item = s["NowPlayingItem"]
+                        item_id = item["Id"]
+                        is_playing = not s.get("PlayState", {}).get("IsPaused", True)
+                        ticks = s.get("PlayState", {}).get("PositionTicks", 0)
+                        pos_s = (ticks / 10_000_000) if ticks else 0.0
+                        prev_is_playing = self._session_state.get(sid, {}).get('is_playing', False)
+                        data_dir = Path(AMBILIGHT_DATA_DIR)
+                        binary_file = data_dir / "binaries" / f"{item_id}.bin"
+                        if not binary_file.exists():
+                            logger.info(f"⏳ Waiting for frame extraction: {item.get('Name', 'Unknown')} ({item_id})")
+                            continue
+                        host, port = self._wled_target()
+                        if is_playing:
+                            if sid not in self._players:
+                                try:
+                                    self._start_player(sid, binary_file, host, port, pos_s)
+                                    logger.info(f"▶️ Player started for session {sid} at {pos_s:.2f}s")
+                                except Exception as e:
+                                    logger.error(f"Failed to start player: {e}")
+                            else:
+                                prev_pos = getattr(self, '_prev_pos_by_sid', {}).get(sid, 0.0)
+                                # If we were paused before, resume the player to restart sending frames
+                                if not prev_is_playing:
+                                    self._resume_player(sid)
+                                if abs(pos_s - prev_pos) > 0.5:
+                                    try:
+                                        self._resync_player(sid, pos_s)
+                                        logger.info(f"🔄 Player resynced to {pos_s:.2f}s")
+                                    except Exception as e:
+                                        logger.warning(f"Player resync failed: {e}")
+                        else:
+                            if sid in self._players:
+                                self._pause_player(sid)
+                        # track last
+                        if not hasattr(self, '_prev_pos_by_sid'):
+                            self._prev_pos_by_sid = {}
+                        self._prev_pos_by_sid[sid] = pos_s
+                        # Update session state
+                        self._session_state[sid] = {
+                            'is_playing': is_playing,
+                            'last_pos': pos_s,
+                            'item_id': item_id,
+                        }
+                else:
+                    if self._players:
+                        logger.info("⏸️  No active sessions - stopping players")
+                        for sid in list(self._players.keys()):
+                            self._stop_player(sid)
+            except Exception as e:
+                logger.error(f"Player loop error: {e}")
+            time.sleep(PLAYBACK_MONITOR_INTERVAL)
+
+    def start(self):
+        logger.info("✅ Player daemon started")
+        t = threading.Thread(target=self.monitor, daemon=True)
+        t.start()
+        try:
+            while not shutdown_event.is_set():
+                time.sleep(1)
+        except KeyboardInterrupt:
+            logger.info("⏹️  Shutdown requested...")
+        finally:
+            shutdown_event.set()
+            for sid in list(self._players.keys()):
+                self._stop_player(sid)
+            logger.info("🔚 Player daemon stopped")
+
+
+def signal_handler(signum, frame):
+    logger.info(f"📡 Received signal {signum}")
+    shutdown_event.set()
+
+
+def main():
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    print("📡 AMBILIGHT PLAYER")
+    print("=" * 50)
+    d = PlayerDaemon()
+    d.start()
+
+
+if __name__ == "__main__":
+    main()
