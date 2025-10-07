@@ -177,8 +177,21 @@ class ExtractorDaemon:
                             except Exception:
                                 se = ''
                         title = item.get('name') or item.get('Name') or 'Unknown'
-                        if kind == 'serie' and se:
-                            logger.info(f"📁 Extracting {kind}: {se}{title} ({item['id']})")
+                        if kind == 'serie':
+                            # Try to infer series title from filepath directory structure
+                            series_title = ''
+                            try:
+                                fp_path = Path(item.get('filepath') or '')
+                                # Expect .../Series/<SeriesName>/Season X/<file>
+                                if fp_path.parent and fp_path.parent.parent:
+                                    series_title = fp_path.parent.parent.name
+                            except Exception:
+                                series_title = ''
+                            series_prefix = f"{series_title} " if series_title else ''
+                            if se:
+                                logger.info(f"📁 Extracting {kind}: {series_prefix}{se}{title} ({item['id']})")
+                            else:
+                                logger.info(f"📁 Extracting {kind}: {series_prefix}{title} ({item['id']})")
                         else:
                             logger.info(f"📁 Extracting {kind}: {title} ({item['id']})")
                         try:
