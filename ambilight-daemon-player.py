@@ -4,7 +4,8 @@ Ambilight Player Daemon (UDP)
 =============================
 
 Monitors Jellyfin sessions and plays AMBI binaries via UDP using
-simplified/ambilight_play.py.
+simplified/ambilight_play.py, synchronizing playback with the current
+video position and detecting seek, pause, resume, and desync events.
 """
 
 import os
@@ -36,9 +37,16 @@ AMBILIGHT_DATA_DIR = os.getenv("AMBILIGHT_DATA_DIR", "/app/data/ambilight")
 PLAYBACK_MONITOR_INTERVAL = float(os.getenv('PLAYBACK_MONITOR_INTERVAL', '0.2'))
 AMBILIGHT_DNS_TTL_SECONDS = int(os.getenv('AMBILIGHT_DNS_TTL_SECONDS', '3600'))
 AMBILIGHT_DISABLE_DNS_RESOLVE = os.getenv('AMBILIGHT_DISABLE_DNS_RESOLVE', 'false').lower() == 'true'
+JELLYFIN_DEVICE_FILTER = os.getenv("JELLYFIN_DEVICE_FILTER", "").strip().lower()
 
 shutdown_event = threading.Event()
 logger = logging.getLogger(__name__)
+
+
+def fmt_ts(seconds: float) -> str:
+    """Format seconds as hh:mm:ss.mmm"""
+    msec = int((seconds % 1) * 1000)
+    return time.strftime("%H:%M:%S", time.gmtime(seconds)) + f".{msec:03d}"
 
 
 class PlayerDaemon:
@@ -105,6 +113,10 @@ class PlayerDaemon:
             sessions = r.json()
             videos = []
             for s in sessions:
+                device_name = s.get("DeviceName", "").lower()
+                if JELLYFIN_DEVICE_FILTER and JELLYFIN_DEVICE_FILTER not in device_name:
+                    logger.debug(f"🚫 Skipping session from device '{device_name}'")
+                    continue
                 now_playing = s.get("NowPlayingItem")
                 if now_playing and now_playing.get("Type") in ["Movie", "Episode", "Video"]:
                     videos.append(s)
@@ -119,12 +131,14 @@ class PlayerDaemon:
         t = threading.Thread(target=p.play, kwargs={"start_time": start_seconds}, daemon=True)
         self._threads[session_id] = t
         t.start()
+        logger.info(f"▶️  Player started for session {session_id} at {fmt_ts(start_seconds)} (from binary {binary_file.name})")
 
     def _stop_player(self, session_id: str):
         p = self._players.pop(session_id, None)
         t = self._threads.pop(session_id, None)
         if p:
             try:
+                logger.info(f"🛑 Stopping player for session {session_id}")
                 p.stop()
             except Exception:
                 pass
@@ -137,6 +151,7 @@ class PlayerDaemon:
     def _pause_player(self, session_id: str):
         p = self._players.get(session_id)
         if p:
+            logger.info(f"⏸️  Pausing player for session {session_id}")
             try:
                 p.pause()
             except Exception:
@@ -145,6 +160,7 @@ class PlayerDaemon:
     def _resume_player(self, session_id: str):
         p = self._players.get(session_id)
         if p:
+            logger.info(f"▶️  Resuming player for session {session_id}")
             try:
                 p.resume()
             except Exception:
@@ -154,9 +170,10 @@ class PlayerDaemon:
         p = self._players.get(session_id)
         if p:
             try:
+                logger.info(f"🔄 Resyncing player for session {session_id} → {fmt_ts(position_seconds)}")
                 p.resync(position_seconds)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Player resync failed: {e}")
 
     def monitor(self):
         logger.info("🎬 Starting player monitoring...")
@@ -168,42 +185,47 @@ class PlayerDaemon:
                         sid = s["Id"]
                         item = s["NowPlayingItem"]
                         item_id = item["Id"]
+                        item_name = item.get("Name", "Unknown")
                         is_playing = not s.get("PlayState", {}).get("IsPaused", True)
                         ticks = s.get("PlayState", {}).get("PositionTicks", 0)
                         pos_s = (ticks / 10_000_000) if ticks else 0.0
-                        prev_is_playing = self._session_state.get(sid, {}).get('is_playing', False)
+                        prev_state = self._session_state.get(sid, {})
+                        prev_is_playing = prev_state.get('is_playing', False)
+                        prev_pos = prev_state.get('last_pos', 0.0)
+
                         data_dir = Path(AMBILIGHT_DATA_DIR)
                         binary_file = data_dir / "binaries" / f"{item_id}.bin"
                         if not binary_file.exists():
-                            logger.info(f"⏳ Waiting for frame extraction: {item.get('Name', 'Unknown')} ({item_id})")
+                            logger.info(f"⏳ Waiting for extraction: {item_name} ({item_id})")
                             continue
+
                         host, port = self._wled_target()
+
+                        # Detect large seek jumps
+                        if abs(pos_s - prev_pos) > 2.0:
+                            logger.info(f"⏩  Session {sid} seek detected: {fmt_ts(prev_pos)} → {fmt_ts(pos_s)} (Δ{pos_s - prev_pos:+.1f}s)")
+
                         if is_playing:
                             if sid not in self._players:
                                 try:
                                     self._start_player(sid, binary_file, host, port, pos_s)
-                                    logger.info(f"▶️ Player started for session {sid} at {pos_s:.2f}s")
                                 except Exception as e:
                                     logger.error(f"Failed to start player: {e}")
                             else:
-                                prev_pos = getattr(self, '_prev_pos_by_sid', {}).get(sid, 0.0)
-                                # If we were paused before, resume the player to restart sending frames
+                                # Handle pause/resume transitions
                                 if not prev_is_playing:
                                     self._resume_player(sid)
-                                if abs(pos_s - prev_pos) > 0.5:
-                                    try:
+                                # Handle desync correction
+                                drift = pos_s - prev_pos
+                                if abs(drift) > 0.10:
+                                    logger.info(f"🎯 Drift check: video={fmt_ts(pos_s)} prev={fmt_ts(prev_pos)} drift={drift:+.3f}s")
+                                    if abs(drift) > 0.2:
                                         self._resync_player(sid, pos_s)
-                                        logger.info(f"🔄 Player resynced to {pos_s:.2f}s")
-                                    except Exception as e:
-                                        logger.warning(f"Player resync failed: {e}")
                         else:
                             if sid in self._players:
                                 self._pause_player(sid)
-                        # track last
-                        if not hasattr(self, '_prev_pos_by_sid'):
-                            self._prev_pos_by_sid = {}
-                        self._prev_pos_by_sid[sid] = pos_s
-                        # Update session state
+
+                        # Save current state
                         self._session_state[sid] = {
                             'is_playing': is_playing,
                             'last_pos': pos_s,
@@ -211,7 +233,7 @@ class PlayerDaemon:
                         }
                 else:
                     if self._players:
-                        logger.info("⏸️  No active sessions - stopping players")
+                        logger.info("⏹️  No active sessions — stopping players")
                         for sid in list(self._players.keys()):
                             self._stop_player(sid)
             except Exception as e:
@@ -240,11 +262,15 @@ def signal_handler(signum, frame):
 
 
 def main():
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s | %(levelname)-7s | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-    print("📡 AMBILIGHT PLAYER")
-    print("=" * 50)
+    print("📡 AMBILIGHT PLAYER DAEMON")
+    print("=" * 60)
     d = PlayerDaemon()
     d.start()
 

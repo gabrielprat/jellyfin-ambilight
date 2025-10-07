@@ -113,8 +113,12 @@ class AmbilightBinaryPlayer:
             if sleep_time > 0:
                 time.sleep(sleep_time)
 
-            self.sock.sendto(payload, (self.host, self.port))
-            self._last_payload = payload
+            try:
+                self.sock.sendto(payload, (self.host, self.port))
+                self._last_payload = payload
+            except Exception as e:
+                print(f"⚠️ UDP send failed: {e}")
+                # Continue playback even if UDP fails
             self._current_frame += 1
 
         print("✅ Playback finished")
