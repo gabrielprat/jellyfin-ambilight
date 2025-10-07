@@ -17,7 +17,6 @@ import signal
 import logging
 import requests
 from urllib.parse import urlparse
-from datetime import datetime
 from pathlib import Path
 from typing import Dict
 
@@ -38,6 +37,8 @@ PLAYBACK_MONITOR_INTERVAL = float(os.getenv('PLAYBACK_MONITOR_INTERVAL', '0.2'))
 AMBILIGHT_DNS_TTL_SECONDS = int(os.getenv('AMBILIGHT_DNS_TTL_SECONDS', '3600'))
 AMBILIGHT_DISABLE_DNS_RESOLVE = os.getenv('AMBILIGHT_DISABLE_DNS_RESOLVE', 'false').lower() == 'true'
 JELLYFIN_DEVICE_FILTER = os.getenv("JELLYFIN_DEVICE_FILTER", "").strip().lower()
+# Device → WLED mapping
+DEVICE_MATCH_FIELD = os.getenv("DEVICE_MATCH_FIELD", "DeviceName").strip()
 
 shutdown_event = threading.Event()
 logger = logging.getLogger(__name__)
@@ -60,6 +61,10 @@ class PlayerDaemon:
         self._players: Dict[str, AmbilightBinaryPlayer] = {}
         self._threads: Dict[str, threading.Thread] = {}
         self._session_state: Dict[str, Dict] = {}
+        # Parse WLED_DEVICE_* mappings once at startup
+        self._device_map: Dict[str, tuple[str, int]] = self._parse_device_mappings()
+        # Track items we already warned about missing binary
+        self._no_binary_notified: set[str] = set()
 
     # DNS helpers
     def _resolve_host_cached(self, host: str, udp: bool = False) -> str | None:
@@ -97,9 +102,53 @@ class PlayerDaemon:
         base = f"{self._jellyfin_parsed.scheme}://{host}{port}"
         return base, {"Host": self._jellyfin_parsed.netloc}
 
-    def _wled_target(self) -> tuple[str, int]:
-        ip = self._resolve_host_cached(WLED_HOST, udp=True)
-        return (ip or WLED_HOST, WLED_UDP_RAW_PORT)
+    def _parse_device_mappings(self) -> Dict[str, tuple[str, int]]:
+        """Parse env vars WLED_DEVICE_* into mapping of identifier -> (host, port)."""
+        mappings: Dict[str, tuple[str, int]] = {}
+        for key, value in os.environ.items():
+            if not key.startswith("WLED_DEVICE_"):
+                continue
+            ident = key[len("WLED_DEVICE_"):].strip().lower()
+            if not ident:
+                continue
+            host = value.strip()
+            port = WLED_UDP_RAW_PORT
+            if ":" in host:
+                h, p = host.rsplit(":", 1)
+                host = h.strip()
+                try:
+                    port = int(p)
+                except ValueError:
+                    port = WLED_UDP_RAW_PORT
+            mappings[ident] = (host, port)
+        return mappings
+
+    def _device_match_value(self, session: Dict) -> str:
+        """Extract the field used to match device mappings from a Jellyfin session."""
+        try:
+            value = session.get(DEVICE_MATCH_FIELD, "")
+            if isinstance(value, str):
+                return value
+        except Exception:
+            pass
+        # Fallback to DeviceName
+        return session.get("DeviceName", "")
+
+    def _target_for_session(self, session: Dict) -> tuple[str, int] | None:
+        """
+        Determine WLED target for this session using WLED_DEVICE_* mappings.
+        Returns (resolved_ip_or_hostname, port) or None if no mapping applies.
+        """
+        device_value = self._device_match_value(session).strip().lower()
+        if not device_value:
+            return None
+        # Exact match on identifier within the device value (substring match)
+        for ident, (host, port) in self._device_map.items():
+            if ident in device_value:
+                # Resolve to IP (use UDP family) and return IP if available
+                ip = self._resolve_host_cached(host, udp=True)
+                return (ip or host, port)
+        return None
 
     def get_sessions(self):
         try:
@@ -193,13 +242,29 @@ class PlayerDaemon:
                         prev_is_playing = prev_state.get('is_playing', False)
                         prev_pos = prev_state.get('last_pos', 0.0)
 
+                        # Determine target strictly from WLED_DEVICE_* mappings
+                        target = self._target_for_session(s)
+                        if not target:
+                            logger.debug("🚫 No WLED device mapping for this session; skipping ambilight.")
+                            # If a player exists from earlier, stop it
+                            if sid in self._players:
+                                self._stop_player(sid)
+                            continue
+                        host, port = target
+
+                        # Only check binary availability if a target exists
                         data_dir = Path(AMBILIGHT_DATA_DIR)
                         binary_file = data_dir / "binaries" / f"{item_id}.bin"
                         if not binary_file.exists():
-                            logger.info(f"⏳ Waiting for extraction: {item_name} ({item_id})")
+                            # Log only once per item id
+                            if item_id not in self._no_binary_notified:
+                                logger.info(f"no binary data for: {item_name} ({item_id})")
+                                self._no_binary_notified.add(item_id)
                             continue
-
-                        host, port = self._wled_target()
+                        else:
+                            # If binary now exists, clear any previous notification so future items can log again
+                            if item_id in self._no_binary_notified:
+                                self._no_binary_notified.discard(item_id)
 
                         # Detect large seek jumps
                         if abs(pos_s - prev_pos) > 2.0:

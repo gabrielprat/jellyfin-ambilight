@@ -161,7 +161,26 @@ class ExtractorDaemon:
                     for item in videos:
                         if shutdown_event.is_set():
                             break
-                        logger.info(f"📁 Extracting: {item['name']}")
+                        # Build enriched title: [movie|serie]: S#E# TITLE (JELLYFIN_ITEM_ID) for series; plain for movies
+                        item_type = (item.get('type') or item.get('Type') or '').lower()
+                        kind = 'movie' if item_type == 'movie' else ('serie' if item_type in ('episode','series','season') else item_type or 'video')
+                        se = ''
+                        if kind == 'serie':
+                            try:
+                                fp = item.get('filepath') or ''
+                                import re
+                                m = re.search(r'[sS](\d{1,2})[eE](\d{1,2})', fp)
+                                if m:
+                                    s_num = int(m.group(1))
+                                    e_num = int(m.group(2))
+                                    se = f"S{s_num}E{e_num} "
+                            except Exception:
+                                se = ''
+                        title = item.get('name') or item.get('Name') or 'Unknown'
+                        if kind == 'serie' and se:
+                            logger.info(f"📁 Extracting {kind}: {se}{title} ({item['id']})")
+                        else:
+                            logger.info(f"📁 Extracting {kind}: {title} ({item['id']})")
                         try:
                             data_dir = Path(AMBILIGHT_DATA_DIR)
                             binary_file = data_dir / "binaries" / f"{item['id']}.bin"

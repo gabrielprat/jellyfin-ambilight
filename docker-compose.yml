@@ -1,69 +1,41 @@
+version: "3.9"
+
 services:
   ambilight-extractor:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.extractor
     container_name: ambilight-extractor
-    hostname: ambilight-extractor
     restart: unless-stopped
-
     env_file:
       - .env
-
-    environment:
-      - PYTHONUNBUFFERED=1
-
     volumes:
-      - ./:/app/src:ro
+      - ${PWD:-.}:/app
       - ${DATA_PATH:-./data}:/app/data
       - ${MOVIES_PATH:-./test-media/movies}:/media/movies:ro
       - ${TV_PATH:-./test-media/tv}:/media/tv:ro
 
-    command: python3 -u /app/src/ambilight-daemon-extractor.py
-
     networks:
-      homelab-network:
-
-    dns:
-      - 192.168.1.191
-      - 1.1.1.1
-      - 8.8.8.8
-
-    dns_opt:
-      - timeout:2
-      - attempts:3
+      - homelab-network
 
   ambilight-player:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.player
     container_name: ambilight-player
-    hostname: ambilight-player
     restart: unless-stopped
-
     env_file:
       - .env
-
-    environment:
-      - PYTHONUNBUFFERED=1
-
     volumes:
-      - ./:/app/src:ro
+      - ${PWD:-.}:/app
       - ${DATA_PATH:-./data}:/app/data
-
-    command: python3 -u /app/src/ambilight-daemon-player.py
-
+      - ${MOVIES_PATH:-./test-media/movies}:/media/movies:ro
+      - ${TV_PATH:-./test-media/tv}:/media/tv:ro
     networks:
-      homelab-network:
+      - homelab-network
 
-    dns:
-      - 192.168.1.191
-      - 1.1.1.1
-      - 8.8.8.8
-
-    dns_opt:
-      - timeout:2
-      - attempts:3
+volumes:
+  ambilight-data:
 
 networks:
   homelab-network:

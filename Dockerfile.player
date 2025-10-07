@@ -1,0 +1,25 @@
+# Stage 1: Build Rust binary
+FROM rust:1.85 as builder
+
+WORKDIR /usr/src/ambilight-player
+COPY ambilight-player/Cargo.toml ambilight-player/Cargo.lock ./
+COPY ambilight-player/src ./src
+
+RUN cargo build --release
+
+# Stage 2: Python runtime
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+# Python sources will be bind-mounted via docker-compose for live reload
+COPY --from=builder /usr/src/ambilight-player/target/release/ambilight-player /usr/local/bin/ambilight-player
+
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+ENV AMBILIGHT_DATA_DIR=/app/data/ambilight
+RUN mkdir -p $AMBILIGHT_DATA_DIR/binaries
+
+CMD ["python3", "-u", "/app/ambilight-daemon-player.py"]

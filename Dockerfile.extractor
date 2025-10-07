@@ -1,0 +1,21 @@
+# Dockerfile.extractor
+FROM python:3.11-slim
+
+# Install system deps for OpenCV + ffmpeg
+RUN apt-get update && apt-get install -y \
+    python3-opencv \
+    ffmpeg \
+    libsm6 libxext6 libxrender-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies (mounted code at runtime via volume)
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+# Create data directory
+ENV AMBILIGHT_DATA_DIR=/app/data/ambilight
+RUN mkdir -p $AMBILIGHT_DATA_DIR/binaries
+
+CMD ["python3", "-u", "/app/ambilight-daemon-extractor.py"]
