@@ -1,8 +1,0 @@
-# ZERO EXTERNAL DEPENDENCIES!
-# Everything we need is in Python standard library:
-# - requests → can be replaced with urllib (in stdlib)
-# - numpy → replace with pure Python + struct module
-# - All other dependencies → REMOVED!
-
-# For now, keep requests for simplicity, but it could be removed too
-requests==2.31.0

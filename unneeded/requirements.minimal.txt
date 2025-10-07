@@ -1,6 +1,0 @@
-# MINIMAL REQUIREMENTS - only what we actually use!
-requests==2.31.0
-numpy==1.24.3
-# websocket-client==1.8.0  # Not needed - we use HTTP polling!
-# opencv-python-headless==4.8.1.78  # Not needed - fast_extractor uses ffmpeg directly!
-# Pillow==10.0.1  # Not needed - we don't do image processing in Python!
