@@ -46,25 +46,16 @@ def _compute_led_zones(frame_shape, counts, border_fraction):
 
     return zones
 
-
 def _extract_led_colors_bgr(frame, zones,
-                            base_gamma=2.2,
+                            gamma=2.2,
                             saturation_boost=1.3,
                             brightness_clip=245,
                             dark_scene_boost=1.2):
     """
     Extract average BGR colors with adaptive gamma correction and brightness balancing.
-    Includes:
-        ✅ Dynamic gamma adjustment per frame (based on global brightness)
-        ✅ Weighted averaging within each zone (reduces flicker from highlights)
+    Dark scenes stay dim; bright scenes stay vivid but not overexposed.
     """
     colors = []
-
-    # --- Dynamic gamma/exposure ---
-    hsv_full = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV).astype(np.float32)
-    global_luminance = np.mean(hsv_full[..., 2])
-    gamma = np.interp(global_luminance, [30, 220], [1.5, 3.0])  # dynamic gamma
-    exposure_gain = np.interp(global_luminance, [30, 220], [1.4, 0.9])  # darker scenes → boost exposure
 
     for (x1, y1, x2, y2) in zones:
         region = frame[y1:y2, x1:x2]
@@ -72,10 +63,11 @@ def _extract_led_colors_bgr(frame, zones,
             colors.append((0, 0, 0))
             continue
 
+        # Convert to HSV to work with brightness and saturation
         hsv = cv2.cvtColor(region, cv2.COLOR_BGR2HSV).astype(np.float32)
 
         # Mask out overexposed whites (too bright regions)
-        mask = hsv[..., 2] < brightness_clip
+        mask = (hsv[..., 2] < brightness_clip)
         if np.any(mask):
             valid = hsv[mask]
         else:
@@ -85,42 +77,29 @@ def _extract_led_colors_bgr(frame, zones,
             colors.append((0, 0, 0))
             continue
 
-        # --- Weighted averaging mask ---
-        h, w = hsv.shape[:2]
-        y, x = np.ogrid[:h, :w]
-        cy, cx = h / 2, w / 2
-        sigma_y, sigma_x = h / 3, w / 3
-        weights = np.exp(-(((x - cx) ** 2) / (2 * sigma_x ** 2) + ((y - cy) ** 2) / (2 * sigma_y ** 2)))
-        weights = weights / np.sum(weights)
+        # Compute average brightness and saturation of the valid region
+        avg_v = np.mean(valid[:, 2])
+        avg_s = np.mean(valid[:, 1])
 
-        # Apply mask to valid pixels
-        v_channel = hsv[..., 2]
-        weights_masked = weights[mask] if np.any(mask) else weights.reshape(-1)
-        weights_masked = weights_masked[:valid.shape[0]]
-        weights_masked /= np.sum(weights_masked) if np.sum(weights_masked) > 0 else 1.0
-
-        avg_v = np.average(valid[:, 2], weights=weights_masked)
-        avg_s = np.average(valid[:, 1], weights=weights_masked)
-
-        # Adaptive saturation
+        # Adaptive saturation boost (less boost in very bright scenes)
         if avg_v < 120:
             valid[:, 1] *= saturation_boost
         elif avg_v < 200:
-            valid[:, 1] *= 1.1
+            valid[:, 1] *= 1.1  # mild boost
+
         valid[:, 1] = np.clip(valid[:, 1], 0, 255)
 
-        # --- Gamma + exposure ---
-        valid[:, 2] = np.clip(255.0 * ((valid[:, 2] / 255.0) ** (1.0 / gamma)) * exposure_gain, 0, 255)
+        # Apply gamma correction to brightness (make darks darker, lights smoother)
+        valid[:, 2] = 255.0 * ((valid[:, 2] / 255.0) ** (1.0 / gamma))
+        valid[:, 2] = np.clip(valid[:, 2], 0, 255)
 
-        # Weighted average HSV
-        avg_h = np.average(valid[:, 0], weights=weights_masked)
-        avg_s = np.average(valid[:, 1], weights=weights_masked)
-        avg_v = np.average(valid[:, 2], weights=weights_masked)
-
-        avg_hsv = np.array([avg_h, avg_s, avg_v]).reshape(1, 1, 3).astype(np.uint8)
+        # Reconstruct region and average
+        avg_hsv = np.mean(valid, axis=0)
+        avg_hsv = avg_hsv.reshape(1, 1, 3).astype(np.uint8)
         avg_bgr = cv2.cvtColor(avg_hsv, cv2.COLOR_HSV2BGR)[0, 0]
 
-        # LED brightness compensation
+        # Optional: global brightness adaptation per LED
+        # If the overall brightness is low, dim the LED accordingly
         brightness_factor = (avg_v / 255.0) ** 1.5
         brightness_factor = max(0.05, min(brightness_factor * dark_scene_boost, 1.0))
 
