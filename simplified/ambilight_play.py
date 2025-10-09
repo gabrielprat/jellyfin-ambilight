@@ -1,3 +1,4 @@
+import os
 import subprocess
 import threading
 import time
@@ -34,6 +35,8 @@ class AmbilightBinaryPlayer:
                 "--port", str(self.port),
                 "--start", str(start_time),
                 "--ref-epoch", str(ref_epoch),
+                "--smooth", str(os.getenv("AMBILIGHT_SMOOTH", "0.35")),
+                "--smooth-ms", str(os.getenv("AMBILIGHT_SMOOTH_MS", "150")),
             ]
 
             logger.info(f"🎬 Starting Rust player from {start_time:.2f}s: {' '.join(cmd)}")

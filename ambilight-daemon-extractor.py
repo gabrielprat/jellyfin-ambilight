@@ -34,6 +34,8 @@ LIBRARY_SCAN_INTERVAL = int(os.getenv('LIBRARY_SCAN_INTERVAL', '3600'))
 EXTRACTION_PRIORITY = os.getenv('EXTRACTION_PRIORITY', 'newest_first')
 EXTRACTION_BATCH_SIZE = int(os.getenv('EXTRACTION_BATCH_SIZE', '5'))
 AMBILIGHT_DATA_DIR = os.getenv("AMBILIGHT_DATA_DIR", "/app/data/ambilight")
+EXTRACTION_START_TIME = os.getenv("EXTRACTION_START_TIME", "")  # e.g. 22:00
+EXTRACTION_END_TIME = os.getenv("EXTRACTION_END_TIME", "")      # e.g. 06:00
 
 shutdown_event = threading.Event()
 logger = logging.getLogger(__name__)
@@ -45,6 +47,82 @@ class ExtractorDaemon:
         self._jellyfin_parsed = urlparse(JELLYFIN_BASE_URL) if JELLYFIN_BASE_URL else None
         self._jellyfin_resolved_ip = None
         self._jellyfin_last_resolve_ts = 0.0
+        # Parse extraction time window once
+        self._window = self._parse_time_window(EXTRACTION_START_TIME, EXTRACTION_END_TIME)
+
+    def _parse_time_window(self, start_str: str, end_str: str):
+        """Parse HH:MM (accepts H:MM) strings to minutes since midnight. Returns (start_min, end_min) or None."""
+        def to_min(s: str):
+            s = (s or "").strip()
+            if not s:
+                return None
+            try:
+                parts = s.split(":")
+                if len(parts) != 2:
+                    return None
+                h = int(parts[0])
+                m = int(parts[1])
+                if h < 0 or h > 23 or m < 0 or m > 59:
+                    return None
+                return h * 60 + m
+            except Exception:
+                return None
+        start_min = to_min(start_str)
+        end_min = to_min(end_str)
+        if start_min is None or end_min is None:
+            return None
+        return (start_min, end_min)
+
+    def _within_window_now(self) -> bool:
+        """Return True if current local time is within the configured extraction window.
+        If window not configured, always True.
+        Supports windows crossing midnight.
+        """
+        if not self._window:
+            return True
+        start_min, end_min = self._window
+        now = time.localtime()
+        now_min = now.tm_hour * 60 + now.tm_min
+        if start_min == end_min:
+            # Degenerate window means disabled; require exact minute match which is impractical → treat as disabled
+            return False
+        if start_min < end_min:
+            # Same-day window (e.g., 09:00-17:00)
+            return start_min <= now_min < end_min
+        else:
+            # Cross-midnight window (e.g., 22:00-06:00)
+            return now_min >= start_min or now_min < end_min
+
+    def _seconds_until_window_open(self) -> int:
+        """Return seconds until the extraction window opens next.
+        If window is not configured or we are within the window, returns 0.
+        """
+        if not self._window:
+            return 0
+        start_min, end_min = self._window
+        now = time.localtime()
+        now_min = now.tm_hour * 60 + now.tm_min
+        if start_min == end_min:
+            # Disabled window
+            return 60  # arbitrary short backoff
+        if self._within_window_now():
+            return 0
+        if start_min < end_min:
+            # Same-day window
+            if now_min < start_min:
+                return (start_min - now_min) * 60
+            # now_min >= end_min (already past window) → wait until tomorrow's start
+            return ((24 * 60 - now_min) + start_min) * 60
+        else:
+            # Cross-midnight window (e.g., 22:00-06:00)
+            if now_min < end_min:
+                # Before end in early morning → next open is today at start_min (later today)
+                return (start_min - now_min) * 60 if start_min >= now_min else ((start_min + (24*60 - now_min)) * 60)
+            # now_min >= end_min and < start_min → wait until start today
+            if now_min < start_min:
+                return (start_min - now_min) * 60
+            # now_min >= start_min would have been within window; already handled
+            return 0
 
     def _resolve_jellyfin_if_needed(self, force: bool = False):
         if not self._jellyfin_parsed:
@@ -60,7 +138,9 @@ class ExtractorDaemon:
         if not force and self._jellyfin_resolved_ip and (now - self._jellyfin_last_resolve_ts) < ttl:
             return
         try:
-            import threading as _t, queue as _q, socket
+            import threading as _t
+            import queue as _q
+            import socket
             rq, eq = _q.Queue(), _q.Queue()
             def worker():
                 try:
@@ -70,7 +150,8 @@ class ExtractorDaemon:
                 except Exception as e:
                     eq.put(e)
             t = _t.Thread(target=worker, daemon=True)
-            t.start(); t.join(timeout=5.0)
+            t.start()
+            t.join(timeout=5.0)
             if t.is_alive():
                 logger.warning(f"DNS resolution timeout for {self._jellyfin_parsed.hostname}")
                 return
@@ -145,6 +226,24 @@ class ExtractorDaemon:
             user_id = None
         while not shutdown_event.is_set():
             try:
+                # Gate new extractions by time window
+                if not self._within_window_now():
+                    if self._window:
+                        s, e = self._window
+                        wait_s = max(1, self._seconds_until_window_open())
+                        eta_minutes = wait_s // 60
+                        logger.info(
+                            f"⏳ Outside extraction window — next window {s//60:02d}:{s%60:02d}-{e//60:02d}:{e%60:02d}. Sleeping ~{eta_minutes} min"
+                        )
+                        # Sleep in chunks to allow responsive shutdown
+                        remaining = wait_s
+                        while remaining > 0 and not shutdown_event.is_set():
+                            chunk = 300 if remaining > 300 else remaining
+                            time.sleep(chunk)
+                            remaining -= chunk
+                    else:
+                        logger.info("⏳ Extraction window disabled — proceeding without restriction")
+                    continue
                 if user_id:
                     try:
                         self.perform_incremental_library_update(user_id)
@@ -205,7 +304,13 @@ class ExtractorDaemon:
                             else:
                                 ok = extract_frames(item['filepath'], item['id'])
                                 if ok:
-                                    logger.info(f"✅ Completed: {item['name']}")
+                                    if kind == 'serie':
+                                        if se:
+                                            logger.info(f"✅ Completed {kind}: {series_prefix}{se}{title} ({item['id']})")
+                                        else:
+                                            logger.info(f"✅ Completed {kind}: {series_prefix}{title} ({item['id']})")
+                                    else:
+                                        logger.info(f"✅ Completed {{kind}}: {item['name']}")
                                 else:
                                     logger.error(f"❌ Extraction failed for: {item['name']}")
                         except Exception as e:
@@ -225,6 +330,12 @@ class ExtractorDaemon:
         logger.info(f"   Directory: {info['data_directory']}")
         logger.info(f"   Binaries: {info['binary_file_count']}")
         logger.info(f"   Pending: {stats['pending_videos']}")
+        # Log extraction window configuration
+        if self._window:
+            s, e = self._window
+            logger.info(f"🕒 Extraction Time Window: {s//60:02d}:{s%60:02d} → {e//60:02d}:{e%60:02d}")
+        else:
+            logger.info("🕒 Extraction Time Window: not configured (no time restrictions)")
         t = threading.Thread(target=self.scan_library_for_new_videos, daemon=True)
         t.start()
         logger.info("✅ Extractor daemon started")

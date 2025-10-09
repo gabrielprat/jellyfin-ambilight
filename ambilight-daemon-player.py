@@ -61,10 +61,47 @@ class PlayerDaemon:
         self._players: Dict[str, AmbilightBinaryPlayer] = {}
         self._threads: Dict[str, threading.Thread] = {}
         self._session_state: Dict[str, Dict] = {}
-        # Parse WLED_DEVICE_* mappings once at startup
-        self._device_map: Dict[str, tuple[str, int]] = self._parse_device_mappings()
         # Track items we already warned about missing binary
         self._no_binary_notified: set[str] = set()
+        # Normalization helper for identifiers and device names
+        self._norm = lambda s: ''.join(ch for ch in (s or '').lower() if ch.isalnum())
+        # Parse WLED_DEVICE_* mappings once at startup
+        self._device_map: Dict[str, tuple[str, int]] = self._parse_device_mappings()
+
+    def _log_startup_configuration(self):
+        try:
+            base_url = JELLYFIN_BASE_URL or "<unset>"
+            data_dir = AMBILIGHT_DATA_DIR
+            lib_interval = os.getenv('LIBRARY_SCAN_INTERVAL', 'unset')
+            playback_interval = os.getenv('PLAYBACK_MONITOR_INTERVAL', str(PLAYBACK_MONITOR_INTERVAL))
+            device_field = DEVICE_MATCH_FIELD
+            udp_port = WLED_UDP_RAW_PORT
+            wled_host = WLED_HOST
+            dns_ttl = AMBILIGHT_DNS_TTL_SECONDS
+            dns_disabled = AMBILIGHT_DISABLE_DNS_RESOLVE
+
+            print("\n⚙️  AMBILIGHT PLAYER CONFIGURATION")
+            print("=" * 60)
+            print(f"Jellyfin Base URL        : {base_url}")
+            print(f"Data Directory           : {data_dir}")
+            print(f"Library Scan Interval    : {lib_interval} seconds")
+            print(f"Playback Monitor Interval: {playback_interval} seconds")
+            print(f"Device Match Field       : {device_field}")
+            print(f"WLED Default Host        : {wled_host}")
+            print(f"WLED UDP RAW Port        : {udp_port}")
+            print(f"DNS Resolve Disabled     : {dns_disabled}")
+            print(f"DNS Cache TTL (sec)      : {dns_ttl}")
+
+            # List WLED_DEVICE_* mappings
+            print("\n🔌 WLED_DEVICE_* mappings:")
+            if self._device_map:
+                for ident, (host, port) in sorted(self._device_map.items()):
+                    print(f"  - {ident} -> {host}:{port}")
+            else:
+                print("  (none configured — ambilight will be disabled until mappings are set)")
+            print("=" * 60)
+        except Exception as e:
+            logger.warning(f"Failed to print startup configuration: {e}")
 
     # DNS helpers
     def _resolve_host_cached(self, host: str, udp: bool = False) -> str | None:
@@ -108,7 +145,8 @@ class PlayerDaemon:
         for key, value in os.environ.items():
             if not key.startswith("WLED_DEVICE_"):
                 continue
-            ident = key[len("WLED_DEVICE_"):].strip().lower()
+            raw_ident = key[len("WLED_DEVICE_"):].strip().lower()
+            ident = self._norm(raw_ident)
             if not ident:
                 continue
             host = value.strip()
@@ -140,35 +178,48 @@ class PlayerDaemon:
         Returns (resolved_ip_or_hostname, port) or None if no mapping applies.
         """
         device_value = self._device_match_value(session).strip().lower()
+        norm_device = self._norm(device_value)
         if not device_value:
             return None
         # Exact match on identifier within the device value (substring match)
         for ident, (host, port) in self._device_map.items():
-            if ident in device_value:
+            if ident in norm_device:
+                logger.debug(f"📡 Device match: '{device_value}' ~ '{ident}' → {host}:{port}")
                 # Resolve to IP (use UDP family) and return IP if available
                 ip = self._resolve_host_cached(host, udp=True)
                 return (ip or host, port)
+        logger.debug(f"🚫 No WLED mapping match for device '{device_value}'. Known idents: {list(self._device_map.keys())}")
         return None
 
     def get_sessions(self):
         try:
             base, host_header = self._jellyfin_base()
+            # Match the previously working auth style (Authorization: MediaBrowser ...)
             headers = {
                 "Authorization": f'MediaBrowser Client="ambilight-player", Device="Python", DeviceId="ambilight-player-001", Version="1.0", Token="{JELLYFIN_API_KEY}"'
             }
             headers.update(host_header)
-            r = requests.get(f"{base}/Sessions", headers=headers, timeout=5)
+            r = requests.get(f"{base}/Sessions", headers=headers, timeout=8)
             r.raise_for_status()
             sessions = r.json()
+            # if not sessions:
+            #     logger.info("/Sessions returned 0 sessions")
+            # else:
+            #     logger.info(f"/Sessions returned {len(sessions)} sessions")
             videos = []
             for s in sessions:
-                device_name = s.get("DeviceName", "").lower()
-                if JELLYFIN_DEVICE_FILTER and JELLYFIN_DEVICE_FILTER not in device_name:
-                    logger.debug(f"🚫 Skipping session from device '{device_name}'")
-                    continue
+                device_name = s.get("DeviceName", "")
+                user_name = s.get("UserName", "")
                 now_playing = s.get("NowPlayingItem")
+                np_type = (now_playing or {}).get("Type") if now_playing else None
+                # logger.info(f"Session id={s.get('Id')} device='{device_name}' user='{user_name}' now_playing={bool(now_playing)} type={np_type}")
+                # Do not pre-filter by JELLYFIN_DEVICE_FILTER here; gating is done via WLED_DEVICE_* mapping later
                 if now_playing and now_playing.get("Type") in ["Movie", "Episode", "Video"]:
                     videos.append(s)
+            # if videos:
+            #     logger.info(f"Playable sessions detected: {len(videos)}")
+            # else:
+            #     logger.info("No playable sessions detected in this poll")
             return videos
         except Exception as e:
             logger.error(f"get_sessions failed: {e}")
@@ -280,14 +331,14 @@ class PlayerDaemon:
                                 # Handle pause/resume transitions
                                 if not prev_is_playing:
                                     self._resume_player(sid)
-                                # Handle desync correction
-                                drift = pos_s - prev_pos
-                                if abs(drift) > 0.10:
-                                    logger.info(f"🎯 Drift check: video={fmt_ts(pos_s)} prev={fmt_ts(prev_pos)} drift={drift:+.3f}s")
-                                    if abs(drift) > 0.2:
-                                        self._resync_player(sid, pos_s)
+                                # Only resync on large position jumps (seeks), not normal playback progression
+                                position_jump = abs(pos_s - prev_pos)
+                                if position_jump > 2.0:  # Only resync on large seeks (>2s jump)
+                                    logger.info(f"⏩ Seek detected: {fmt_ts(prev_pos)} → {fmt_ts(pos_s)} (jump={position_jump:.1f}s)")
+                                    self._resync_player(sid, pos_s)
                         else:
-                            if sid in self._players:
+                            # Only pause if transitioning from playing to paused
+                            if sid in self._players and prev_is_playing:
                                 self._pause_player(sid)
 
                         # Save current state
@@ -307,6 +358,8 @@ class PlayerDaemon:
 
     def start(self):
         logger.info("✅ Player daemon started")
+        # Show startup configuration once
+        self._log_startup_configuration()
         t = threading.Thread(target=self.monitor, daemon=True)
         t.start()
         try:

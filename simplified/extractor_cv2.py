@@ -1,9 +1,12 @@
 import os
 import struct
+import logging
 from pathlib import Path
 
 import cv2
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 def _compute_led_zones(frame_shape, counts, border_fraction):
     """Compute LED sampling rectangles in clockwise order: right → bottom → left → top."""
@@ -43,15 +46,87 @@ def _compute_led_zones(frame_shape, counts, border_fraction):
 
     return zones
 
-def _extract_led_colors_bgr(frame, zones):
+
+def _extract_led_colors_bgr(frame, zones,
+                            base_gamma=2.2,
+                            saturation_boost=1.3,
+                            brightness_clip=245,
+                            dark_scene_boost=1.2):
+    """
+    Extract average BGR colors with adaptive gamma correction and brightness balancing.
+    Includes:
+        ✅ Dynamic gamma adjustment per frame (based on global brightness)
+        ✅ Weighted averaging within each zone (reduces flicker from highlights)
+    """
     colors = []
+
+    # --- Dynamic gamma/exposure ---
+    hsv_full = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV).astype(np.float32)
+    global_luminance = np.mean(hsv_full[..., 2])
+    gamma = np.interp(global_luminance, [30, 220], [1.5, 3.0])  # dynamic gamma
+    exposure_gain = np.interp(global_luminance, [30, 220], [1.4, 0.9])  # darker scenes → boost exposure
+
     for (x1, y1, x2, y2) in zones:
         region = frame[y1:y2, x1:x2]
         if region.size == 0:
             colors.append((0, 0, 0))
+            continue
+
+        hsv = cv2.cvtColor(region, cv2.COLOR_BGR2HSV).astype(np.float32)
+
+        # Mask out overexposed whites (too bright regions)
+        mask = hsv[..., 2] < brightness_clip
+        if np.any(mask):
+            valid = hsv[mask]
         else:
-            avg = region.mean(axis=(0, 1))  # BGR
-            colors.append((int(avg[0]), int(avg[1]), int(avg[2])))
+            valid = hsv.reshape(-1, 3)
+
+        if valid.shape[0] == 0:
+            colors.append((0, 0, 0))
+            continue
+
+        # --- Weighted averaging mask ---
+        h, w = hsv.shape[:2]
+        y, x = np.ogrid[:h, :w]
+        cy, cx = h / 2, w / 2
+        sigma_y, sigma_x = h / 3, w / 3
+        weights = np.exp(-(((x - cx) ** 2) / (2 * sigma_x ** 2) + ((y - cy) ** 2) / (2 * sigma_y ** 2)))
+        weights = weights / np.sum(weights)
+
+        # Apply mask to valid pixels
+        v_channel = hsv[..., 2]
+        weights_masked = weights[mask] if np.any(mask) else weights.reshape(-1)
+        weights_masked = weights_masked[:valid.shape[0]]
+        weights_masked /= np.sum(weights_masked) if np.sum(weights_masked) > 0 else 1.0
+
+        avg_v = np.average(valid[:, 2], weights=weights_masked)
+        avg_s = np.average(valid[:, 1], weights=weights_masked)
+
+        # Adaptive saturation
+        if avg_v < 120:
+            valid[:, 1] *= saturation_boost
+        elif avg_v < 200:
+            valid[:, 1] *= 1.1
+        valid[:, 1] = np.clip(valid[:, 1], 0, 255)
+
+        # --- Gamma + exposure ---
+        valid[:, 2] = np.clip(255.0 * ((valid[:, 2] / 255.0) ** (1.0 / gamma)) * exposure_gain, 0, 255)
+
+        # Weighted average HSV
+        avg_h = np.average(valid[:, 0], weights=weights_masked)
+        avg_s = np.average(valid[:, 1], weights=weights_masked)
+        avg_v = np.average(valid[:, 2], weights=weights_masked)
+
+        avg_hsv = np.array([avg_h, avg_s, avg_v]).reshape(1, 1, 3).astype(np.uint8)
+        avg_bgr = cv2.cvtColor(avg_hsv, cv2.COLOR_HSV2BGR)[0, 0]
+
+        # LED brightness compensation
+        brightness_factor = (avg_v / 255.0) ** 1.5
+        brightness_factor = max(0.05, min(brightness_factor * dark_scene_boost, 1.0))
+
+        final_color = tuple(int(c * brightness_factor) for c in avg_bgr)
+        colors.append(final_color)
+
     return colors
 
 def extract_video_to_binary(video_file, output_file, top=89, bottom=89, left=49, right=49,
@@ -61,9 +136,13 @@ def extract_video_to_binary(video_file, output_file, top=89, bottom=89, left=49,
         raise RuntimeError(f"Cannot open video {video_file}")
 
     try:
-        # Use native video FPS
-        fps_f = cap.get(cv2.CAP_PROP_FPS)
-        fps = int(round(fps_f)) if fps_f and fps_f > 0 else 30
+        # Use exact video FPS for precise timing
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps and fps > 0:
+            logger.info(f"\t🎬 Video FPS: {fps}")
+        else:
+            fps = 24
+            logger.warning(f"\t⚠️ Video FPS not found, using default: {fps}")
 
         ret, first = cap.read()
         if not ret:
@@ -77,9 +156,9 @@ def extract_video_to_binary(video_file, output_file, top=89, bottom=89, left=49,
         safe_led_count = max(1, led_count)
         offset_mod = offset % safe_led_count
 
-        # Build binary in memory
+        # Build binary in memory - store exact FPS as float
         data = bytearray()
-        data += struct.pack("<4sHHBH", b"AMBI", fps, led_count, fmt_byte, offset_mod)
+        data += struct.pack("<4sfHHH", b"AMBI", fps, led_count, fmt_byte, offset_mod)
 
         frame_idx = 0
         while True:
@@ -109,12 +188,12 @@ def extract_video_to_binary(video_file, output_file, top=89, bottom=89, left=49,
 
             frame_idx += 1
             if frame_idx % 100 == 0:
-                print(f"Processed {frame_idx} frames...", end="\r")
+                logger.info(f"Processed {frame_idx} frames...")
 
         with open(output_file, "wb") as f:
             f.write(data)
 
-        print(f"\n✅ Done! Saved to '{output_file}' ({frame_idx} frames, FPS={fps})")
+        logger.info(f"\n✅ Done! Saved to '{output_file}' ({frame_idx} frames, FPS={fps})")
     finally:
         cap.release()
 
@@ -126,7 +205,7 @@ def _mark_extraction_failed(jellyfin_item_id, error_message):
         storage = FileBasedStorage()
         storage.mark_extraction_failed(jellyfin_item_id, error_message)
     except Exception as e:
-        print(f"❌ Failed to mark extraction as failed: {e}")
+        logger.error(f"❌ Failed to mark extraction as failed: {e}")
 
 
 def _mark_extraction_completed(jellyfin_item_id):
@@ -135,7 +214,7 @@ def _mark_extraction_completed(jellyfin_item_id):
         storage = FileBasedStorage()
         storage.mark_extraction_completed(jellyfin_item_id)
     except Exception as e:
-        print(f"❌ Failed to mark extraction as completed: {e}")
+        logger.error(f"❌ Failed to mark extraction as completed: {e}")
 
 
 def extract_frames(video_file, jellyfin_item_id):
@@ -159,7 +238,7 @@ def extract_frames(video_file, jellyfin_item_id):
         binary_dir.mkdir(parents=True, exist_ok=True)
         out_path = binary_dir / f"{jellyfin_item_id}.bin"
     except Exception as e:
-        print(f"❌ Configuration error: {e}")
+        logger.error(f"❌ Configuration error: {e}")
         _mark_extraction_failed(jellyfin_item_id, str(e))
         return False
 
@@ -178,6 +257,16 @@ def extract_frames(video_file, jellyfin_item_id):
         _mark_extraction_completed(jellyfin_item_id)
         return True
     except Exception as e:
-        print(f"❌ Extraction failed: {e}")
+        logger.error(f"❌ Extraction failed: {e}")
         _mark_extraction_failed(jellyfin_item_id, str(e))
         return False
+
+def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s | %(levelname)-7s | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+
+if __name__ == "__main__":
+    main()

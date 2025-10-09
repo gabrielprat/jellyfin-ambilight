@@ -288,6 +288,10 @@ class OptimizedFileBasedStorage:
         print("Getting videos needing extraction...")
         videos_needing_extraction = []
 
+        # Get age filtering configuration
+        extraction_max_age_days = float(os.getenv("EXTRACTION_MAX_AGE_DAYS", "0"))
+        current_time = time.time()
+
         # Scan all items
         for item_file in self.items_dir.glob("*.json"):
             try:
@@ -309,6 +313,30 @@ class OptimizedFileBasedStorage:
                 # Skip if extraction has already failed
                 if item_data.get('extraction_status') == 'failed':
                     continue
+
+                # Age filtering: Skip videos older than EXTRACTION_MAX_AGE_DAYS
+                if extraction_max_age_days > 0:
+                    jellyfin_date_created = item_data.get('jellyfin_date_created')
+                    if jellyfin_date_created:
+                        try:
+                            # Parse the date string (assuming ISO format)
+                            if 'T' in jellyfin_date_created:
+                                # ISO format with time
+                                created_dt = datetime.fromisoformat(jellyfin_date_created.replace('Z', '+00:00'))
+                            else:
+                                # Date only format
+                                created_dt = datetime.fromisoformat(jellyfin_date_created)
+
+                            # Convert to timestamp and calculate age
+                            created_timestamp = created_dt.timestamp()
+                            age_days = (current_time - created_timestamp) / (24 * 3600)
+
+                            if age_days > extraction_max_age_days:
+                                print(f"⏰ Skipping {item_data.get('name', 'Unknown')} - too old ({age_days:.1f} days > {extraction_max_age_days} days)")
+                                continue
+                        except (ValueError, TypeError) as e:
+                            print(f"⚠️ Could not parse date for {item_data.get('name', 'Unknown')}: {jellyfin_date_created} - {e}")
+                            # Continue processing if date parsing fails
 
                 # Check if binary exists
                 bin_file = self.binaries_dir / f"{item_data['id']}.bin"

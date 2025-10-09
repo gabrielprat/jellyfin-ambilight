@@ -1,11 +1,13 @@
 use std::env;
 use std::fs::File;
-use std::io::{self, Read, BufRead};
+use std::io::{self, BufReader, Read, BufRead};
 use std::net::UdpSocket;
-use std::thread::sleep;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::process::exit;
 use std::sync::{Arc, Mutex};
+use std::thread::sleep;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use byteorder::{LittleEndian, ReadBytesExt};
 
 fn main() {
     // ---- Parse arguments ----
@@ -23,7 +25,12 @@ fn main() {
     let mut port: u16 = 0;
     let mut start_time: f64 = 0.0;
     let mut ref_epoch: f64 = 0.0;
-    let mut has_ref_epoch: bool = false;
+    let mut has_ref_epoch = false;
+
+    let sync_lead = env::var("AMBILIGHT_SYNC_LEAD_SECONDS")
+        .unwrap_or_else(|_| "0.2".to_string())
+        .parse::<f64>()
+        .unwrap_or(0.2);
 
     let mut i = 1;
     while i < args.len() {
@@ -32,92 +39,90 @@ fn main() {
             "--host" => host = args[i + 1].clone(),
             "--port" => port = args[i + 1].parse().unwrap_or(19446),
             "--start" => start_time = args[i + 1].parse().unwrap_or(0.0),
-            "--ref-epoch" => { ref_epoch = args[i + 1].parse().unwrap_or(0.0); has_ref_epoch = true; },
+            "--ref-epoch" => {
+                ref_epoch = args[i + 1].parse().unwrap_or(0.0);
+                has_ref_epoch = true;
+            }
             _ => {}
         }
         i += 2;
     }
 
-    // ---- Read binary file ----
-    let mut file = File::open(&filepath).expect("Failed to open binary file");
+    // ---- Open binary file ----
+    let file = File::open(&filepath).expect("Failed to open binary file");
+    let mut reader = BufReader::new(file);
 
-    let mut header = [0u8; 9];
-    file.read_exact(&mut header).expect("Failed to read header");
-
-    if &header[0..4] != b"AMBI" {
+    // ---- Read header ----
+    let mut magic = [0u8; 4];
+    reader.read_exact(&mut magic).expect("Failed to read magic");
+    if &magic != b"AMBI" {
         eprintln!("Invalid file header");
         exit(1);
     }
 
-    let fps = u16::from_le_bytes([header[4], header[5]]) as f64;
-    let led_count = u16::from_le_bytes([header[6], header[7]]);
-    let fmt = header[8];
-    let rgbw = fmt == 1;
+    let mut fps = reader.read_f32::<LittleEndian>().expect("Failed to read FPS");
+    if !fps.is_finite() || fps <= 0.1 || fps > 300.0 {
+        eprintln!("⚠️ Invalid FPS in header, falling back to 24");
+        fps = 24.0;
+    }
 
-    let mut offset_buf = [0u8; 2];
-    file.read_exact(&mut offset_buf).expect("Failed to read offset");
-    let offset = u16::from_le_bytes(offset_buf);
+    let led_count = reader.read_u16::<LittleEndian>().expect("Failed to read LED count");
+    let fmt_u16 = reader.read_u16::<LittleEndian>().expect("Failed to read format");
+    let offset = reader.read_u16::<LittleEndian>().expect("Failed to read offset");
+    let rgbw = fmt_u16 == 1;
 
     println!(
-        "🎬 Playing {} → {} LEDs @ {:.2} FPS (offset={}, rgbw={})",
+        "🎬 Playing {} → {} LEDs @ {:.3} FPS (offset={}, rgbw={})",
         filepath, led_count, fps, offset, rgbw
     );
 
-    // ---- Setup UDP socket ----
-    let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind UDP socket");
-    socket.connect(format!("{}:{}", host, port))
-        .expect("Failed to connect to WLED");
-
     let bytes_per_led = if rgbw { 4 } else { 3 };
     let frame_size = (led_count as usize) * bytes_per_led;
-    let frame_duration = Duration::from_secs_f64(1.0 / fps);
 
-    // ---- Load all frames into memory (timestamp + payload per frame) ----
+    // ---- Load all frames into memory (timestamps + payloads) ----
     let mut frames: Vec<Vec<u8>> = Vec::new();
     let mut timestamps_us: Vec<u64> = Vec::new();
     let mut ts_buf = [0u8; 8];
     let mut payload_buf = vec![0u8; frame_size];
 
     loop {
-        match file.read_exact(&mut ts_buf) {
+        match reader.read_exact(&mut ts_buf) {
             Ok(()) => {
                 let ts_us = u64::from_le_bytes(ts_buf);
                 timestamps_us.push(ts_us);
-                if let Err(_) = file.read_exact(&mut payload_buf) {
-                    // Incomplete payload at EOF; drop the timestamp we just read
+                if let Err(_) = reader.read_exact(&mut payload_buf) {
                     timestamps_us.pop();
                     break;
                 }
                 frames.push(payload_buf.clone());
             }
-            Err(_) => {
-                break;
-            }
+            Err(_) => break,
         }
     }
 
-    println!("📦 Loaded {} frames (with timestamps)", frames.len());
+    println!("📦 Loaded {} frames", frames.len());
 
-    // ---- Handle start offset with optional wall-clock synchronization ----
+    // ---- Setup UDP socket ----
+    let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind UDP socket");
+    socket.connect(format!("{}:{}", host, port)).expect("Failed to connect to WLED");
+
+    // ---- Start time / wall-clock sync ----
     let launch_delta = if has_ref_epoch {
-        let now_epoch = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_else(|_| Duration::from_secs(0)).as_secs_f64();
+        let now_epoch = SystemTime::now().duration_since(UNIX_EPOCH)
+            .unwrap_or_else(|_| Duration::from_secs(0)).as_secs_f64();
         (now_epoch - ref_epoch).max(0.0)
     } else {
         0.0
     };
 
-    let effective_start_time = (start_time + launch_delta).max(0.0);
-    // Find first frame whose timestamp >= effective_start_time
+    let effective_start_time = (start_time + launch_delta + sync_lead).max(0.0);
     let start_ts_us = (effective_start_time * 1_000_000.0) as u64;
-    let mut start_frame: usize = 0;
-    if !timestamps_us.is_empty() {
-        // Linear scan is fine for now; data volume is moderate. Could be binary search later.
-        while start_frame < timestamps_us.len() && timestamps_us[start_frame] < start_ts_us {
-            start_frame += 1;
-        }
+    let mut start_frame = 0;
+    while start_frame < timestamps_us.len() && timestamps_us[start_frame] < start_ts_us {
+        start_frame += 1;
     }
-    let mut frame_index = start_frame.min(frames.len());
 
+    let mut frame_index = start_frame.min(frames.len());
     let mut start_instant = Instant::now();
     let mut elapsed_base = Duration::from_millis(0);
     let mut last_paused = false;
@@ -134,21 +139,11 @@ fn main() {
             let mut line = String::new();
             loop {
                 line.clear();
-                let read = reader.read_line(&mut line);
-                if read.is_err() {
-                    break;
-                }
-                if read.unwrap() == 0 {
-                    // EOF
-                    break;
-                }
+                if reader.read_line(&mut line).is_err() { break; }
                 let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
-                // Commands: SEEK <seconds> | PAUSE | RESUME
+                if trimmed.is_empty() { continue; }
                 let parts: Vec<&str> = trimmed.split_whitespace().collect();
-                if parts.len() == 2 && (parts[0] == "SEEK" || parts[0] == "seek") {
+                if parts.len() == 2 && (parts[0].eq_ignore_ascii_case("SEEK")) {
                     if let Ok(sec) = parts[1].parse::<f64>() {
                         if let Ok(mut tgt) = seek_target_s_reader.lock() {
                             *tgt = Some(sec);
@@ -163,20 +158,21 @@ fn main() {
         });
     }
 
-    if has_ref_epoch {
-        println!("▶️ Starting playback from frame {} (start={:.3}s, delta={:.3}s)", frame_index, start_time, launch_delta);
-    } else {
-        println!("▶️ Starting playback from frame {}", frame_index);
-    }
+    println!(
+        "▶️ Starting playback from frame {} (lead={:.3}s)",
+        frame_index, sync_lead
+    );
 
-    // ---- Main playback loop ----
+    // ---- Playback loop with smoothing ----
+    let base_smooth: f32 = 0.3; // 150ms smoothing
+    let mut prev_frame: Option<Vec<u8>> = None;
+
     while frame_index < frames.len() {
-        // Handle pending seek requests
+        // Handle seeks
         if let Ok(mut tgt) = seek_target_s.lock() {
             if let Some(sec) = *tgt {
-                // Compute target frame by timestamp
-                let target_us = if sec <= 0.0 { 0u64 } else { (sec * 1_000_000.0) as u64 };
-                let mut target_frame: usize = 0;
+                let target_us = ((sec + sync_lead) * 1_000_000.0) as u64;
+                let mut target_frame = 0;
                 while target_frame < timestamps_us.len() && timestamps_us[target_frame] < target_us {
                     target_frame += 1;
                 }
@@ -189,50 +185,52 @@ fn main() {
             }
         }
 
-        // Observe pause/resume state transitions
+        // Pause/resume
         let paused_now = if let Ok(p) = paused_flag.lock() { *p } else { false };
         if paused_now != last_paused {
-            if paused_now {
-                // entering paused: accumulate elapsed so far
-                elapsed_base += start_instant.elapsed();
-            } else {
-                // resuming: reset start instant
-                start_instant = Instant::now();
-            }
+            if paused_now { elapsed_base += start_instant.elapsed(); }
+            else { start_instant = Instant::now(); }
             last_paused = paused_now;
         }
 
-        // Use per-frame timestamps for pacing
-        let target_time = if frame_index < timestamps_us.len() && start_frame < timestamps_us.len() {
-            let rel_us = timestamps_us[frame_index].saturating_sub(timestamps_us[start_frame]);
-            Duration::from_micros(rel_us as u64)
-        } else {
-            // Fallback to fps-based pacing if timestamps missing
-            frame_duration.mul_f64((frame_index - start_frame) as f64)
-        };
-        let elapsed = if paused_now { elapsed_base } else { elapsed_base + start_instant.elapsed() };
-
-        // Sync to maintain real-time playback
-        if elapsed < target_time {
-            let wait = target_time - elapsed;
-            // When paused, avoid long sleeps; tick periodically
-            if paused_now {
-                let tick = Duration::from_millis(10);
-                sleep(if wait > tick { tick } else { wait });
-                continue;
-            } else {
-                sleep(wait);
-            }
-        }
-
         if paused_now {
-            // While paused, do not send or advance frames
             sleep(Duration::from_millis(10));
             continue;
         }
 
-        let frame = &frames[frame_index];
-        if socket.send(frame).is_err() {
+        // Compute target frame timestamp
+        let target_time = if frame_index < timestamps_us.len() && start_frame < timestamps_us.len() {
+            let rel_us = timestamps_us[frame_index].saturating_sub(timestamps_us[start_frame]);
+            Duration::from_micros(rel_us as u64)
+        } else {
+            Duration::from_secs_f64((frame_index - start_frame) as f64 / fps as f64)
+        };
+
+        let elapsed = elapsed_base + start_instant.elapsed();
+        if elapsed < target_time {
+            sleep(target_time - elapsed);
+        }
+
+        let mut frame = frames[frame_index].clone();
+
+        // --- Smooth blending with previous frame ---
+        if let Some(prev) = &prev_frame {
+            let alpha = base_smooth.min(1.0);
+            for i in 0..frame.len() {
+                let blended = (frame[i] as f32 * alpha + prev[i] as f32 * (1.0 - alpha)).round();
+                frame[i] = blended.min(255.0) as u8;
+            }
+        }
+
+        prev_frame = Some(frame.clone());
+
+        // Apply offset rotation
+        if offset > 0 {
+            let n = (offset as usize * bytes_per_led) % frame.len();
+            frame.rotate_right(n);
+        }
+
+        if socket.send(&frame).is_err() {
             eprintln!("⚠️ UDP send failed at frame {}", frame_index);
         }
 
