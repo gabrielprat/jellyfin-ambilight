@@ -310,7 +310,7 @@ class ExtractorDaemon:
                                         else:
                                             logger.info(f"✅ Completed {kind}: {series_prefix}{title} ({item['id']})")
                                     else:
-                                        logger.info(f"✅ Completed {{kind}}: {item['name']}")
+                                        logger.info(f"✅ Completed {kind}: {item['name']}")
                                 else:
                                     logger.error(f"❌ Extraction failed for: {item['name']}")
                         except Exception as e:
