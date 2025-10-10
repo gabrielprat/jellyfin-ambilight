@@ -8,6 +8,7 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+
 def _compute_led_zones(frame_shape, counts, border_fraction):
     """Compute LED sampling rectangles in clockwise order: right → bottom → left → top."""
     h, w = frame_shape[:2]
@@ -46,6 +47,7 @@ def _compute_led_zones(frame_shape, counts, border_fraction):
 
     return zones
 
+
 def _extract_led_colors_bgr(frame, zones,
                             gamma=2.2,
                             saturation_boost=1.3,
@@ -53,60 +55,89 @@ def _extract_led_colors_bgr(frame, zones,
                             dark_scene_boost=1.2):
     """
     Extract average BGR colors with adaptive gamma correction and brightness balancing.
-    Dark scenes stay dim; bright scenes stay vivid but not overexposed.
+    This implementation keeps the same color logic as your original but is optimized:
+      - Converts whole frame to HSV once (instead of per-region).
+      - Uses precomputed slices for regions.
     """
     colors = []
 
+    # Ensure we have a contiguous array
+    if not frame.flags['C_CONTIGUOUS']:
+        frame = np.ascontiguousarray(frame)
+
+    # Convert entire frame once to HSV float32 to avoid repeated conversions
+    hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV).astype(np.float32)
+
+    # Pre-define commonly used locals for speed
+    clip = brightness_clip
+    sat_boost = saturation_boost
+    inv_gamma = 1.0 / gamma
+    dark_boost = dark_scene_boost
+
     for (x1, y1, x2, y2) in zones:
-        region = frame[y1:y2, x1:x2]
-        if region.size == 0:
+        # Small micro-optimisation: use views (no copies) where possible
+        region_hsv = hsv_frame[y1:y2, x1:x2]  # shape (h_zone, w_zone, 3)
+        if region_hsv.size == 0:
             colors.append((0, 0, 0))
             continue
 
-        # Convert to HSV to work with brightness and saturation
-        hsv = cv2.cvtColor(region, cv2.COLOR_BGR2HSV).astype(np.float32)
+        # V channel mask: pixels below brightness_clip
+        v_channel = region_hsv[..., 2]
+        mask = (v_channel < clip)
 
-        # Mask out overexposed whites (too bright regions)
-        mask = (hsv[..., 2] < brightness_clip)
+        # If any valid pixels, use them; else fall back to full region
         if np.any(mask):
-            valid = hsv[mask]
+            # masked indexing creates a 2D array of HSV triples where mask True
+            # For efficiency extract columns once
+            valid = region_hsv[mask]
         else:
-            valid = hsv.reshape(-1, 3)
+            valid = region_hsv.reshape(-1, 3)
 
         if valid.shape[0] == 0:
             colors.append((0, 0, 0))
             continue
 
         # Compute average brightness and saturation of the valid region
-        avg_v = np.mean(valid[:, 2])
-        avg_s = np.mean(valid[:, 1])
+        avg_v = float(np.mean(valid[:, 2]))
+        avg_s = float(np.mean(valid[:, 1]))
 
         # Adaptive saturation boost (less boost in very bright scenes)
-        if avg_v < 120:
-            valid[:, 1] *= saturation_boost
-        elif avg_v < 200:
+        if avg_v < 120.0:
+            valid[:, 1] *= sat_boost
+        elif avg_v < 200.0:
             valid[:, 1] *= 1.1  # mild boost
 
-        valid[:, 1] = np.clip(valid[:, 1], 0, 255)
+        # Clip saturation
+        np.clip(valid[:, 1], 0.0, 255.0, out=valid[:, 1])
 
-        # Apply gamma correction to brightness (make darks darker, lights smoother)
-        valid[:, 2] = 255.0 * ((valid[:, 2] / 255.0) ** (1.0 / gamma))
-        valid[:, 2] = np.clip(valid[:, 2], 0, 255)
+        # Apply gamma correction to brightness channel (per-pixel)
+        # valid[:,2] = 255.0 * ((valid[:,2]/255.0) ** (1.0/gamma))
+        # Do the power operation vectorized
+        v_norm = valid[:, 2] / 255.0
+        # avoid invalid values
+        # v_norm ** inv_gamma when v_norm in [0,1]
+        v_gamma = np.power(v_norm, inv_gamma, dtype=np.float32) * 255.0
+        valid[:, 2] = np.clip(v_gamma, 0.0, 255.0)
 
-        # Reconstruct region and average
-        avg_hsv = np.mean(valid, axis=0)
-        avg_hsv = avg_hsv.reshape(1, 1, 3).astype(np.uint8)
-        avg_bgr = cv2.cvtColor(avg_hsv, cv2.COLOR_HSV2BGR)[0, 0]
+        # Reconstruct average HSV and convert to BGR (single pixel)
+        avg_h = float(np.mean(valid[:, 0]))
+        avg_s = float(np.mean(valid[:, 1]))
+        avg_v2 = float(np.mean(valid[:, 2]))
 
-        # Optional: global brightness adaptation per LED
-        # If the overall brightness is low, dim the LED accordingly
+        avg_hsv = np.array([[[avg_h, avg_s, avg_v2]]], dtype=np.uint8)
+        avg_bgr = cv2.cvtColor(avg_hsv, cv2.COLOR_HSV2BGR)[0, 0]  # uint8 triplet
+
+        # Global brightness adaptation per LED
         brightness_factor = (avg_v / 255.0) ** 1.5
-        brightness_factor = max(0.05, min(brightness_factor * dark_scene_boost, 1.0))
+        brightness_factor = max(0.05, min(brightness_factor * dark_boost, 1.0))
 
-        final_color = tuple(int(c * brightness_factor) for c in avg_bgr)
+        final_color = (int(avg_bgr[0] * brightness_factor),
+                       int(avg_bgr[1] * brightness_factor),
+                       int(avg_bgr[2] * brightness_factor))
         colors.append(final_color)
 
     return colors
+
 
 def extract_video_to_binary(video_file, output_file, top=89, bottom=89, left=49, right=49,
                             offset=46, rgbw=False, border_fraction=0.05):
@@ -137,9 +168,10 @@ def extract_video_to_binary(video_file, output_file, top=89, bottom=89, left=49,
 
         # Build binary in memory - store exact FPS as float
         data = bytearray()
-        data += struct.pack("<4sfHHH", b"AMBI", fps, led_count, fmt_byte, offset_mod)
+        data += struct.pack("<4sfHHH", b"AMBI", float(fps), led_count, fmt_byte, offset_mod)
 
         frame_idx = 0
+        # Processing loop
         while True:
             ret, frame = cap.read()
             if not ret:
@@ -149,7 +181,8 @@ def extract_video_to_binary(video_file, output_file, top=89, bottom=89, left=49,
             ts_us = int(ts_ms * 1000)
             data += struct.pack("<Q", ts_us)
 
-            # Extract colors in clockwise order starting at top-right
+            # Convert frame once and pass zones
+            # frame is BGR from OpenCV
             bgr_colors = _extract_led_colors_bgr(frame, zones)
 
             # Apply offset as COUNTER-CLOCKWISE rotation:
@@ -240,12 +273,14 @@ def extract_frames(video_file, jellyfin_item_id):
         _mark_extraction_failed(jellyfin_item_id, str(e))
         return False
 
+
 def main():
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s | %(levelname)-7s | %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
+
 
 if __name__ == "__main__":
     main()
