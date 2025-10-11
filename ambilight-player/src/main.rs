@@ -96,10 +96,6 @@ fn main() -> std::io::Result<()> {
     let led_order = env::var("AMBILIGHT_ORDER").unwrap_or_else(|_| "RGB".to_string());
     // NEW: minimum LED brightness in 0..255
     let min_led_brightness: f32 = env::var("AMBILIGHT_MIN_LED_BRIGHTNESS").unwrap_or_else(|_| "0.0".to_string()).parse().unwrap_or(0.0);
-    // NEW: whether to perform first-frame auto calibration (default true)
-    let calibrate_first_frame = env::var("AMBILIGHT_CALIBRATE_FIRST_FRAME")
-        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
-        .unwrap_or(true);
 
     let mut i = 1;
     while i < args.len() {
@@ -140,8 +136,8 @@ fn main() -> std::io::Result<()> {
     let bytes_per_led = if rgbw { 4 } else { 3 };
     let frame_size = led_count * bytes_per_led;
 
-    println!("🎬 Playing {} → {} LEDs @ {:.3} FPS (offset={}, rgbw={}, smooth={:.3}s, gamma={:.3}, sat={:.3}, min_led_brightness={:.1}, calibrate_first_frame={})",
-        filepath, led_count, if fps>0.0 { fps } else { 0.0 }, offset, rgbw, smooth_seconds, gamma_base, saturation, min_led_brightness, calibrate_first_frame);
+    println!("🎬 Playing {} → {} LEDs @ {:.3} FPS (offset={}, rgbw={}, smooth={:.3}s, gamma={:.3}, sat={:.3}, min_led_brightness={:.1})",
+        filepath, led_count, if fps>0.0 { fps } else { 0.0 }, offset, rgbw, smooth_seconds, gamma_base, saturation, min_led_brightness);
 
     // ---- Load frames into memory
     let mut frames: Vec<Vec<u8>> = Vec::new();
@@ -263,22 +259,6 @@ fn main() -> std::io::Result<()> {
             ((frame_index - start_frame) as f64 * (1.0 / fps) * 1_000_000.0) as u64
         };
         let rel_s = (rel_us as f64) / 1_000_000.0;
-
-        // --- FIRST-FRAME AUTO CALIBRATION (one-time) ---
-        // if calibrate_first_frame && has_ref_epoch && !first_calibrated {
-        //     // compute absolute frame time (seconds since epoch, according to binary timestamps)
-        //     let frame_abs_s = (timestamps_us[frame_index] as f64) / 1_000_000.0;
-        //     // wall-clock time since ref_epoch
-        //     let now_epoch = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_else(|_| Duration::from_secs(0)).as_secs_f64();
-        //     let real_since_ref = now_epoch - ref_epoch;
-        //     // correction = real_time - video_frame_time
-        //     time_correction_s = real_since_ref - frame_abs_s;
-        //     first_calibrated = true;
-        //     eprintln!(
-        //         "⏱️ Auto-sync calibration: now_since_ref={:.3}s frame_abs={:.3}s -> correction={:+.3}s",
-        //         real_since_ref, frame_abs_s, time_correction_s
-        //     );
-        // }
 
         // target relative seconds after applying correction and lead (can be negative)
         let target_rel_s = rel_s - time_correction_s - sync_lead;
