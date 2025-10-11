@@ -96,6 +96,10 @@ fn main() -> std::io::Result<()> {
     let led_order = env::var("AMBILIGHT_ORDER").unwrap_or_else(|_| "RGB".to_string());
     // NEW: minimum LED brightness in 0..255
     let min_led_brightness: f32 = env::var("AMBILIGHT_MIN_LED_BRIGHTNESS").unwrap_or_else(|_| "0.0".to_string()).parse().unwrap_or(0.0);
+    // NEW: whether to perform first-frame auto calibration (default true)
+    let calibrate_first_frame = env::var("AMBILIGHT_CALIBRATE_FIRST_FRAME")
+        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+        .unwrap_or(true);
 
     let mut i = 1;
     while i < args.len() {
@@ -136,8 +140,8 @@ fn main() -> std::io::Result<()> {
     let bytes_per_led = if rgbw { 4 } else { 3 };
     let frame_size = led_count * bytes_per_led;
 
-    println!("🎬 Playing {} → {} LEDs @ {:.3} FPS (offset={}, rgbw={}, smooth={:.3}s, gamma={:.3}, sat={:.3}, min_led_brightness={:.1})",
-        filepath, led_count, if fps>0.0 { fps } else { 0.0 }, offset, rgbw, smooth_seconds, gamma_base, saturation, min_led_brightness);
+    println!("🎬 Playing {} → {} LEDs @ {:.3} FPS (offset={}, rgbw={}, smooth={:.3}s, gamma={:.3}, sat={:.3}, min_led_brightness={:.1}, calibrate_first_frame={})",
+        filepath, led_count, if fps>0.0 { fps } else { 0.0 }, offset, rgbw, smooth_seconds, gamma_base, saturation, min_led_brightness, calibrate_first_frame);
 
     // ---- Load frames into memory
     let mut frames: Vec<Vec<u8>> = Vec::new();
@@ -168,7 +172,9 @@ fn main() -> std::io::Result<()> {
 
     let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind UDP socket");
     socket.connect(format!("{}:{}", host, port)).expect("Failed to connect to WLED");
-
+    // print socket status and remote address
+    println!("🔍 Socket status: {:?}", socket.local_addr());
+    println!("🔍 Remote address: {:?}", socket.peer_addr());
     let launch_delta = if has_ref_epoch {
         let now_epoch = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_else(|_| Duration::from_secs(0)).as_secs_f64();
         (now_epoch - ref_epoch).max(0.0)
@@ -183,6 +189,10 @@ fn main() -> std::io::Result<()> {
     let mut start_instant = Instant::now();
     let mut elapsed_base = Duration::from_millis(0);
     let mut last_paused = false;
+
+    // New: time correction from first-frame calibration (seconds, can be negative — allows leading)
+    let mut time_correction_s: f64 = 0.0;
+    let mut first_calibrated = false;
 
     let mut ema_acc: Option<Vec<f32>> = None;
     let smooth_tau = clamp_f(smooth_seconds, 0.001, 5.0);
@@ -230,6 +240,9 @@ fn main() -> std::io::Result<()> {
                 start_frame = frame_index.min(frames.len());
                 start_instant = Instant::now();
                 elapsed_base = Duration::from_millis(0);
+                // reset calibration on manual seek (we'll recalibrate on next frames)
+                first_calibrated = false;
+                time_correction_s = 0.0;
                 eprintln!("🔄 SEEK to {:.3}s → frame {}", sec, frame_index);
                 *tgt = None;
             }
@@ -242,11 +255,38 @@ fn main() -> std::io::Result<()> {
         }
         if paused_now { sleep(Duration::from_millis(10)); continue; }
 
-        let target_time = if frame_index < timestamps_us.len() && start_frame < timestamps_us.len() {
-            let rel_us = timestamps_us[frame_index].saturating_sub(timestamps_us[start_frame]);
-            Duration::from_micros(rel_us as u64)
+        // compute ideal target_time relative to start_frame (seconds)
+        let rel_us = if frame_index < timestamps_us.len() && start_frame < timestamps_us.len() {
+            timestamps_us[frame_index].saturating_sub(timestamps_us[start_frame])
         } else {
-            Duration::from_secs_f64((frame_index - start_frame) as f64 / fps)
+            // fallback using fps spacing
+            ((frame_index - start_frame) as f64 * (1.0 / fps) * 1_000_000.0) as u64
+        };
+        let rel_s = (rel_us as f64) / 1_000_000.0;
+
+        // --- FIRST-FRAME AUTO CALIBRATION (one-time) ---
+        // if calibrate_first_frame && has_ref_epoch && !first_calibrated {
+        //     // compute absolute frame time (seconds since epoch, according to binary timestamps)
+        //     let frame_abs_s = (timestamps_us[frame_index] as f64) / 1_000_000.0;
+        //     // wall-clock time since ref_epoch
+        //     let now_epoch = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_else(|_| Duration::from_secs(0)).as_secs_f64();
+        //     let real_since_ref = now_epoch - ref_epoch;
+        //     // correction = real_time - video_frame_time
+        //     time_correction_s = real_since_ref - frame_abs_s;
+        //     first_calibrated = true;
+        //     eprintln!(
+        //         "⏱️ Auto-sync calibration: now_since_ref={:.3}s frame_abs={:.3}s -> correction={:+.3}s",
+        //         real_since_ref, frame_abs_s, time_correction_s
+        //     );
+        // }
+
+        // target relative seconds after applying correction and lead (can be negative)
+        let target_rel_s = rel_s - time_correction_s - sync_lead;
+        // convert to Duration for sleeping; if negative, we don't sleep (we lead/send immediately)
+        let target_time = if target_rel_s > 0.0 {
+            Duration::from_secs_f64(target_rel_s)
+        } else {
+            Duration::from_millis(0)
         };
 
         let elapsed = elapsed_base + start_instant.elapsed();
