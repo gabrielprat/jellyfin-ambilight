@@ -218,6 +218,8 @@ fn main() -> std::io::Result<()> {
     let seek_target: Arc<Mutex<Option<f64>>> = Arc::new(Mutex::new(None));
     let paused_flag: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
     let running_cmd: Arc<AtomicBool> = running.clone();
+    let request_blank_on_exit = Arc::new(AtomicBool::new(false));
+    let request_blank_on_exit_cmd = request_blank_on_exit.clone();
     {
         let seek_clone = Arc::clone(&seek_target);
         let paused_clone = Arc::clone(&paused_flag);
@@ -241,11 +243,10 @@ fn main() -> std::io::Result<()> {
                 } else if parts.len() == 1 && parts[0].eq_ignore_ascii_case("RESUME") {
                     if let Ok(mut p) = paused_clone.lock() { *p = false; }
                 } else if parts.len() == 1 && parts[0].eq_ignore_ascii_case("STOP") {
-                    eprintln!("🟥 STOP received, clearing LEDs and exiting...");
-                    let zeroes = vec![0u8; frame_size];
-                    let _ = UdpSocket::bind("0.0.0.0:0")
-                        .and_then(|s| s.send_to(&zeroes, format!("{}:{}", host, port)));
-                    std::process::exit(0);
+                    eprintln!("🟥 STOP received — will blank and exit.");
+                    request_blank_on_exit_cmd.store(true, Ordering::SeqCst);
+                    running_cmd.store(false, Ordering::SeqCst);
+                    break;
                 }
             }
         });
@@ -440,6 +441,15 @@ fn main() -> std::io::Result<()> {
 
             frame_index += 1;
         }
+    }
+    // Finalize: if requested (STOP) or on shutdown, send a few zero frames to blank LEDs
+    if request_blank_on_exit.load(Ordering::SeqCst) || !running.load(Ordering::SeqCst) {
+        let zeroes = vec![0u8; frame_size];
+        for _ in 0..3 {
+            let _ = socket.send(&zeroes);
+            sleep(Duration::from_millis(20));
+        }
+        eprintln!("🧹 Sent blank frames on exit");
     }
     println!("🏁 Playback complete or stopped.");
     Ok(())

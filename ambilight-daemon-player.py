@@ -280,10 +280,18 @@ class PlayerDaemon:
         while not shutdown_event.is_set():
             try:
                 sessions = self.get_sessions()
+                current_session_ids: set[str] = set()
                 if sessions:
                     for s in sessions:
                         sid = s["Id"]
+                        current_session_ids.add(sid)
                         item = s["NowPlayingItem"]
+                        # If session has no playable item anymore, stop any existing player for it
+                        if not item or item.get("Type") not in ["Movie", "Episode", "Video"]:
+                            if sid in self._players:
+                                self._stop_player(sid)
+                            continue
+
                         item_id = item["Id"]
                         item_name = item.get("Name", "Unknown")
                         is_playing = not s.get("PlayState", {}).get("IsPaused", True)
@@ -321,6 +329,10 @@ class PlayerDaemon:
                         if abs(pos_s - prev_pos) > 2.0:
                             logger.info(f"⏩  Session {sid} seek detected: {fmt_ts(prev_pos)} → {fmt_ts(pos_s)} (Δ{pos_s - prev_pos:+.1f}s)")
 
+                        # If the currently loaded item changed, stop the existing player (we'll start a new one below)
+                        if sid in self._players and prev_state.get('item_id') and prev_state.get('item_id') != item_id:
+                            self._stop_player(sid)
+
                         if is_playing:
                             if sid not in self._players:
                                 try:
@@ -351,6 +363,12 @@ class PlayerDaemon:
                     if self._players:
                         logger.info("⏹️  No active sessions — stopping players")
                         for sid in list(self._players.keys()):
+                            self._stop_player(sid)
+                # Stop players for sessions that disappeared from /Sessions
+                if current_session_ids is not None and self._players:
+                    for sid in list(self._players.keys()):
+                        if sid not in current_session_ids:
+                            logger.info(f"⏹️  Session {sid} no longer present — stopping player")
                             self._stop_player(sid)
             except Exception as e:
                 logger.error(f"Player loop error: {e}")
