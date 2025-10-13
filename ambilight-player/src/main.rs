@@ -3,11 +3,13 @@ use std::fs::File;
 use std::io::{self, BufReader, Read, BufRead};
 use std::net::UdpSocket;
 use std::process::exit;
-use std::sync::{Arc, Mutex};
-use std::thread::sleep;
+use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
+use std::thread::{self, sleep};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use byteorder::{LittleEndian, ReadBytesExt};
+use signal_hook::consts::signal::*;
+use signal_hook::iterator::Signals;
 
 #[inline]
 fn clamp_f(v: f32, lo: f32, hi: f32) -> f32 {
@@ -68,6 +70,24 @@ fn remap_order(r: u8, g: u8, b: u8, order: &str) -> (u8, u8, u8) {
 }
 
 fn main() -> std::io::Result<()> {
+    // ---- graceful shutdown flags ----
+    let running = Arc::new(AtomicBool::new(true));
+
+    // 1️⃣  SIGINT/SIGTERM handler
+    {
+        let running = running.clone();
+        thread::spawn(move || {
+            let mut signals = Signals::new([SIGINT, SIGTERM]).unwrap();
+            for sig in signals.forever() {
+                eprintln!("📴 Received signal {sig}, shutting down...");
+                running.store(false, Ordering::SeqCst);
+                break;
+            }
+        });
+    }
+
+    // NOTE: Do not start another stdin consumer here; the command thread below reads stdin.
+
     // ---- Arguments parsing
     let args: Vec<String> = env::args().collect();
     if args.len() < 9 {
@@ -96,6 +116,8 @@ fn main() -> std::io::Result<()> {
     let led_order = env::var("AMBILIGHT_ORDER").unwrap_or_else(|_| "RGB".to_string());
     // NEW: minimum LED brightness in 0..255
     let min_led_brightness: f32 = env::var("AMBILIGHT_MIN_LED_BRIGHTNESS").unwrap_or_else(|_| "0.0".to_string()).parse().unwrap_or(0.0);
+    // simple time correction (disabled for now)
+    let mut time_correction_s = 0.0;
 
     let mut i = 1;
     while i < args.len() {
@@ -195,6 +217,7 @@ fn main() -> std::io::Result<()> {
 
     let seek_target: Arc<Mutex<Option<f64>>> = Arc::new(Mutex::new(None));
     let paused_flag: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
+    let running_cmd: Arc<AtomicBool> = running.clone();
     {
         let seek_clone = Arc::clone(&seek_target);
         let paused_clone = Arc::clone(&paused_flag);
@@ -203,6 +226,7 @@ fn main() -> std::io::Result<()> {
             let mut reader = io::BufReader::new(stdin.lock());
             let mut line = String::new();
             loop {
+                if !running_cmd.load(Ordering::SeqCst) { break; }
                 line.clear();
                 if reader.read_line(&mut line).is_err() { break; }
                 let trimmed = line.trim();
@@ -217,7 +241,10 @@ fn main() -> std::io::Result<()> {
                 } else if parts.len() == 1 && parts[0].eq_ignore_ascii_case("RESUME") {
                     if let Ok(mut p) = paused_clone.lock() { *p = false; }
                 } else if parts.len() == 1 && parts[0].eq_ignore_ascii_case("STOP") {
-                    eprintln!("STOP received, exiting.");
+                    eprintln!("🟥 STOP received, clearing LEDs and exiting...");
+                    let zeroes = vec![0u8; frame_size];
+                    let _ = UdpSocket::bind("0.0.0.0:0")
+                        .and_then(|s| s.send_to(&zeroes, format!("{}:{}", host, port)));
                     std::process::exit(0);
                 }
             }
@@ -225,169 +252,195 @@ fn main() -> std::io::Result<()> {
     }
 
     println!("▶️ Starting playback from frame {} (lead={:.3}s)", frame_index, sync_lead);
-
-    while frame_index < frames.len() {
-        if let Ok(mut tgt) = seek_target.lock() {
-            if let Some(sec) = *tgt {
-                let target_us = ((sec + sync_lead) * 1_000_000.0) as u64;
-                let mut target_frame = 0usize;
-                while target_frame < timestamps_us.len() && timestamps_us[target_frame] < target_us { target_frame += 1; }
-                frame_index = target_frame.min(frames.len());
-                start_frame = frame_index.min(frames.len());
-                start_instant = Instant::now();
-                elapsed_base = Duration::from_millis(0);
-                // reset calibration on manual seek (we'll recalibrate on next frames)
-                first_calibrated = false;
-                time_correction_s = 0.0;
-                eprintln!("🔄 SEEK to {:.3}s → frame {}", sec, frame_index);
-                *tgt = None;
+    while running.load(Ordering::SeqCst) && frame_index < frames.len() {
+        while running.load(Ordering::SeqCst) && frame_index < frames.len() {
+            if let Ok(mut tgt) = seek_target.lock() {
+                if let Some(sec) = *tgt {
+                    let target_us = ((sec + sync_lead) * 1_000_000.0) as u64;
+                    let mut target_frame = 0usize;
+                    while target_frame < timestamps_us.len() && timestamps_us[target_frame] < target_us { target_frame += 1; }
+                    frame_index = target_frame.min(frames.len());
+                    start_frame = frame_index.min(frames.len());
+                    start_instant = Instant::now();
+                    elapsed_base = Duration::from_millis(0);
+                    // reset calibration on manual seek (we'll recalibrate on next frames)
+                    first_calibrated = false;
+                    time_correction_s = 0.0;
+                    eprintln!("🔄 SEEK to {:.3}s → frame {}", sec, frame_index);
+                    *tgt = None;
+                }
             }
-        }
 
-        let paused_now = if let Ok(p) = paused_flag.lock() { *p } else { false };
-        if paused_now != last_paused {
-            if paused_now { elapsed_base += start_instant.elapsed(); } else { start_instant = Instant::now(); }
+            let paused_now = if let Ok(p) = paused_flag.lock() { *p } else { false };
+            // --- Handle pause / resume logic ---
+            if paused_now && !last_paused {
+                // Just entered pause
+                elapsed_base += start_instant.elapsed();
+                eprintln!("⏸️  Paused playback");
+            }
+            if !paused_now && last_paused {
+                // Just resumed
+                start_instant = Instant::now();
+                eprintln!("▶️  Resumed playback");
+            }
             last_paused = paused_now;
-        }
-        if paused_now { sleep(Duration::from_millis(10)); continue; }
 
-        // compute ideal target_time relative to start_frame (seconds)
-        let rel_us = if frame_index < timestamps_us.len() && start_frame < timestamps_us.len() {
-            timestamps_us[frame_index].saturating_sub(timestamps_us[start_frame])
-        } else {
-            // fallback using fps spacing
-            ((frame_index - start_frame) as f64 * (1.0 / fps) * 1_000_000.0) as u64
-        };
-        let rel_s = (rel_us as f64) / 1_000_000.0;
+            // While paused, don't advance frames; send one zero frame when pause is entered
+            if paused_now {
+                static mut SENT_BLANK_ON_PAUSE: bool = false;
+                unsafe {
+                    if !SENT_BLANK_ON_PAUSE {
+                        let zeroes = vec![0u8; frame_size];
+                        let _ = socket.send(&zeroes);
+                        SENT_BLANK_ON_PAUSE = true;
+                        eprintln!("🕳️  Sent blank frame on pause");
+                    }
+                }
+                sleep(Duration::from_millis(80));
+                continue;
+            } else {
+                // reset blank flag on resume
+                unsafe { /* scoped reset */ }
+            }
 
-        // target relative seconds after applying correction and lead (can be negative)
-        let target_rel_s = rel_s - time_correction_s - sync_lead;
-        // convert to Duration for sleeping; if negative, we don't sleep (we lead/send immediately)
-        let target_time = if target_rel_s > 0.0 {
-            Duration::from_secs_f64(target_rel_s)
-        } else {
-            Duration::from_millis(0)
-        };
+            // compute ideal target_time relative to start_frame (seconds)
+            let rel_us = if frame_index < timestamps_us.len() && start_frame < timestamps_us.len() {
+                timestamps_us[frame_index].saturating_sub(timestamps_us[start_frame])
+            } else {
+                // fallback using fps spacing
+                ((frame_index - start_frame) as f64 * (1.0 / fps) * 1_000_000.0) as u64
+            };
+            let rel_s = (rel_us as f64) / 1_000_000.0;
 
-        let elapsed = elapsed_base + start_instant.elapsed();
-        if elapsed < target_time { sleep(target_time - elapsed); }
+            // target relative seconds after applying correction and lead (can be negative)
+            let target_rel_s = rel_s - time_correction_s - sync_lead;
+            // convert to Duration for sleeping; if negative, we don't sleep (we lead/send immediately)
+            let target_time = if target_rel_s > 0.0 {
+                Duration::from_secs_f64(target_rel_s)
+            } else {
+                Duration::from_millis(0)
+            };
 
-        let raw = &frames[frame_index];
+            let elapsed = elapsed_base + start_instant.elapsed();
+            if elapsed < target_time { sleep(target_time - elapsed); }
 
-        let mut sum_lum: f32 = 0.0;
-        let mut count_pix: usize = 0;
-        let mut idx = 0usize;
-        while idx + 2 < raw.len() {
-            let r = raw[idx] as f32;
-            let g = raw[idx + 1] as f32;
-            let b = raw[idx + 2] as f32;
-            let lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-            sum_lum += lum;
-            count_pix += 1;
-            idx += bytes_per_led;
-        }
-        let avg_lum = if count_pix > 0 { sum_lum / (count_pix as f32) } else { 0.0 };
-        let gamma_adj = clamp_f(gamma_base * (1.0 - (avg_lum / 255.0) * 0.6), 1.0, 3.0);
-        let inv_gamma = 1.0 / gamma_adj;
+            let raw = &frames[frame_index];
 
-        let frame_dt_s = if frame_index == 0 {
-            (1.0 / fps) as f32
-        } else {
-            let prev_us = timestamps_us.get(frame_index.saturating_sub(1)).cloned().unwrap_or(0) as f64;
-            let cur_us = timestamps_us[frame_index] as f64;
-            let dt = (cur_us - prev_us) / 1e6;
-            if dt <= 0.0 { (1.0 / fps) as f32 } else { dt as f32 }
-        };
-        let k = 1.0 - (-frame_dt_s / smooth_tau).exp();
+            let mut sum_lum: f32 = 0.0;
+            let mut count_pix: usize = 0;
+            let mut idx = 0usize;
+            while idx + 2 < raw.len() {
+                let r = raw[idx] as f32;
+                let g = raw[idx + 1] as f32;
+                let b = raw[idx + 2] as f32;
+                let lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                sum_lum += lum;
+                count_pix += 1;
+                idx += bytes_per_led;
+            }
+            let avg_lum = if count_pix > 0 { sum_lum / (count_pix as f32) } else { 0.0 };
+            let gamma_adj = clamp_f(gamma_base * (1.0 - (avg_lum / 255.0) * 0.6), 1.0, 3.0);
+            let inv_gamma = 1.0 / gamma_adj;
 
-        if ema_acc.is_none() {
-            let mut init_acc = vec![0.0f32; raw.len()];
+            let frame_dt_s = if frame_index == 0 {
+                (1.0 / fps) as f32
+            } else {
+                let prev_us = timestamps_us.get(frame_index.saturating_sub(1)).cloned().unwrap_or(0) as f64;
+                let cur_us = timestamps_us[frame_index] as f64;
+                let dt = (cur_us - prev_us) / 1e6;
+                if dt <= 0.0 { (1.0 / fps) as f32 } else { dt as f32 }
+            };
+            let k = 1.0 - (-frame_dt_s / smooth_tau).exp();
+
+            if ema_acc.is_none() {
+                let mut init_acc = vec![0.0f32; raw.len()];
+                let mut ib = 0usize;
+                while ib + 2 < raw.len() {
+                    init_acc[ib] = raw[ib] as f32;
+                    init_acc[ib + 1] = raw[ib + 1] as f32;
+                    init_acc[ib + 2] = raw[ib + 2] as f32;
+                    if bytes_per_led == 4 { init_acc[ib + 3] = raw[ib + 3] as f32; }
+                    ib += bytes_per_led;
+                }
+                ema_acc = Some(init_acc);
+            }
+
+            let acc = ema_acc.as_mut().unwrap();
+            let mut out_frame = vec![0u8; raw.len()];
+
+            let s_user = clamp_f(saturation, 0.0, 5.0);
+            let g_user = gamma_base.max(0.01);
+            let b_target = brightness_target.max(1.0);
+            let min_b = min_led_brightness.max(0.0);
+
+            let brightness_factor = if avg_lum > 1.0 {
+                let factor = (b_target / avg_lum) * 0.7 + 0.3;
+                clamp_f(factor, 0.05, 2.5)
+            } else { 1.0 };
+
             let mut ib = 0usize;
             while ib + 2 < raw.len() {
-                init_acc[ib] = raw[ib] as f32;
-                init_acc[ib + 1] = raw[ib + 1] as f32;
-                init_acc[ib + 2] = raw[ib + 2] as f32;
-                if bytes_per_led == 4 { init_acc[ib + 3] = raw[ib + 3] as f32; }
+                let r_u = raw[ib] as f32;
+                let g_u = raw[ib + 1] as f32;
+                let b_u = raw[ib + 2] as f32;
+
+                let r_n = (r_u / 255.0).max(0.0).min(1.0);
+                let g_n = (g_u / 255.0).max(0.0).min(1.0);
+                let b_n = (b_u / 255.0).max(0.0).min(1.0);
+
+                let r_lin = r_n.powf(g_user);
+                let g_lin = g_n.powf(g_user);
+                let b_lin = b_n.powf(g_user);
+
+                let (h, s, v) = rgb_to_hsv(r_lin, g_lin, b_lin);
+                let s_new = clamp_f(s * s_user, 0.0, 1.0);
+                let (r_s, g_s, b_s) = hsv_to_rgb(h, s_new, v);
+
+                let r_g = clamp_f(r_s.powf(inv_gamma), 0.0, 1.0);
+                let g_g = clamp_f(g_s.powf(inv_gamma), 0.0, 1.0);
+                let b_g = clamp_f(b_s.powf(inv_gamma), 0.0, 1.0);
+
+                let r_f = r_g * brightness_factor * 255.0;
+                let g_f = g_g * brightness_factor * 255.0;
+                let b_f = b_g * brightness_factor * 255.0;
+
+                acc[ib]     = acc[ib]     * (1.0 - k) + r_f * k;
+                acc[ib + 1] = acc[ib + 1] * (1.0 - k) + g_f * k;
+                acc[ib + 2] = acc[ib + 2] * (1.0 - k) + b_f * k;
+
+                let mut r_out = acc[ib].round();
+                let mut g_out = acc[ib + 1].round();
+                let mut b_out = acc[ib + 2].round();
+
+                // --- APPLY TRUE MIN LED BRIGHTNESS ---
+                let lum = 0.2126*r_out + 0.7152*g_out + 0.0722*b_out;
+                if lum < min_b {
+                    r_out = 0.0;
+                    g_out = 0.0;
+                    b_out = 0.0;
+                }
+
+                let (r_m, g_m, b_m) = remap_order(r_out as u8, g_out as u8, b_out as u8, &led_order);
+
+                out_frame[ib]     = r_m;
+                out_frame[ib + 1] = g_m;
+                out_frame[ib + 2] = b_m;
+
+                if bytes_per_led == 4 {
+                    let w_idx = ib + 3;
+                    acc[w_idx] = acc[w_idx] * (1.0 - k) + (raw[w_idx] as f32) * k;
+                    out_frame[w_idx] = acc[w_idx].round().min(255.0).max(0.0) as u8;
+                }
+
                 ib += bytes_per_led;
             }
-            ema_acc = Some(init_acc);
+            // (PLL-based sync correction removed due to instability)
+
+            let _ = socket.send(&out_frame);
+
+            frame_index += 1;
         }
-
-        let acc = ema_acc.as_mut().unwrap();
-        let mut out_frame = vec![0u8; raw.len()];
-
-        let s_user = clamp_f(saturation, 0.0, 5.0);
-        let g_user = gamma_base.max(0.01);
-        let b_target = brightness_target.max(1.0);
-        let min_b = min_led_brightness.max(0.0);
-
-        let brightness_factor = if avg_lum > 1.0 {
-            let factor = (b_target / avg_lum) * 0.7 + 0.3;
-            clamp_f(factor, 0.05, 2.5)
-        } else { 1.0 };
-
-        let mut ib = 0usize;
-        while ib + 2 < raw.len() {
-            let r_u = raw[ib] as f32;
-            let g_u = raw[ib + 1] as f32;
-            let b_u = raw[ib + 2] as f32;
-
-            let r_n = (r_u / 255.0).max(0.0).min(1.0);
-            let g_n = (g_u / 255.0).max(0.0).min(1.0);
-            let b_n = (b_u / 255.0).max(0.0).min(1.0);
-
-            let r_lin = r_n.powf(g_user);
-            let g_lin = g_n.powf(g_user);
-            let b_lin = b_n.powf(g_user);
-
-            let (h, s, v) = rgb_to_hsv(r_lin, g_lin, b_lin);
-            let s_new = clamp_f(s * s_user, 0.0, 1.0);
-            let (r_s, g_s, b_s) = hsv_to_rgb(h, s_new, v);
-
-            let r_g = clamp_f(r_s.powf(inv_gamma), 0.0, 1.0);
-            let g_g = clamp_f(g_s.powf(inv_gamma), 0.0, 1.0);
-            let b_g = clamp_f(b_s.powf(inv_gamma), 0.0, 1.0);
-
-            let r_f = r_g * brightness_factor * 255.0;
-            let g_f = g_g * brightness_factor * 255.0;
-            let b_f = b_g * brightness_factor * 255.0;
-
-            acc[ib]     = acc[ib]     * (1.0 - k) + r_f * k;
-            acc[ib + 1] = acc[ib + 1] * (1.0 - k) + g_f * k;
-            acc[ib + 2] = acc[ib + 2] * (1.0 - k) + b_f * k;
-
-            let mut r_out = acc[ib].round();
-            let mut g_out = acc[ib + 1].round();
-            let mut b_out = acc[ib + 2].round();
-
-            // --- APPLY TRUE MIN LED BRIGHTNESS ---
-            let lum = 0.2126*r_out + 0.7152*g_out + 0.0722*b_out;
-            if lum < min_b {
-                r_out = 0.0;
-                g_out = 0.0;
-                b_out = 0.0;
-            }
-
-            let (r_m, g_m, b_m) = remap_order(r_out as u8, g_out as u8, b_out as u8, &led_order);
-
-            out_frame[ib]     = r_m;
-            out_frame[ib + 1] = g_m;
-            out_frame[ib + 2] = b_m;
-
-            if bytes_per_led == 4 {
-                let w_idx = ib + 3;
-                acc[w_idx] = acc[w_idx] * (1.0 - k) + (raw[w_idx] as f32) * k;
-                out_frame[w_idx] = acc[w_idx].round().min(255.0).max(0.0) as u8;
-            }
-
-            ib += bytes_per_led;
-        }
-
-        let _ = socket.send(&out_frame);
-
-        frame_index += 1;
     }
-
-    println!("🏁 Playback complete.");
+    println!("🏁 Playback complete or stopped.");
     Ok(())
 }
