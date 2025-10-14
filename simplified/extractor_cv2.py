@@ -10,6 +10,7 @@ import struct
 import logging
 from pathlib import Path
 import cv2
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -44,25 +45,17 @@ def _compute_led_zones(frame_shape, counts, border_fraction):
         zones.append((0, y1, left_w, y2))
     return zones
 
-def _avg_region_bgr(frame, x1, y1, x2, y2, min_lum=10):
+def _avg_region_bgr(frame, x1, y1, x2, y2):
+    """Return pure average BGR values for the region, no gamma/brightness mods."""
     region = frame[y1:y2, x1:x2]
     if region.size == 0:
-        return (0,0,0)
-    m = cv2.mean(region)
-    b, g, r = int(m[0]), int(m[1]), int(m[2])
-    # compute perceived brightness
-    lum = 0.2126*r + 0.7152*g + 0.0722*b
-    if lum < float(min_lum):
-        return (0,0,0)
-    return (b,g,r)
+        return (0, 0, 0)
+    # Use simple mean in BGR space
+    m = cv2.mean(region)  # (b, g, r, a)
+    return (int(m[0]), int(m[1]), int(m[2]))
 
 def extract_video_to_binary(video_file, output_file, top=89, bottom=89, left=49, right=49,
-                            offset=46, rgbw=False, border_fraction=0.05, multiplier=1.0):
-    """
-    multiplier: if >1.0, attempt to sample more frequently than source FPS.
-                e.g. multiplier=2.0 -> twice as many samples as video FPS.
-    NOTE: multiplier > 1 seeks the video per sample which is slower but allows oversampling.
-    """
+                            offset=46, rgbw=False, border_fraction=0.05):
     cap = cv2.VideoCapture(video_file)
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open video {video_file}")
@@ -92,76 +85,38 @@ def extract_video_to_binary(video_file, output_file, top=89, bottom=89, left=49,
 
         # Sampling strategy
         # desired sample interval in seconds
-        sample_interval_s = (1.0 / fps) / float(multiplier if multiplier > 0 else 1.0)
+        sample_interval_s = 1.0 / fps
         total_frames_written = 0
         frame_idx = 0
 
-        if multiplier == 1.0:
-            # Fast path: read sequential frames
-            # We already consumed first frame in "first"
-            cap.set(cv2.CAP_PROP_POS_MSEC, 0)
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                ts_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
-                ts_us = int(ts_ms * 1000)
-                data += struct.pack("<Q", ts_us)
-                # extract colors (clockwise starting top-right)
-                min_lum = os.getenv("AMBILIGHT_MIN_LED_LUMINANCE", "30")
-                bgr_colors = [_avg_region_bgr(frame, *z, min_lum=min_lum) for z in zones]
-                # apply offset counted from TOP-LEFT, CLOCKWISE: rotate LEFT by offset
-                if offset_mod:
-                    bgr_colors = bgr_colors[offset_mod:] + bgr_colors[:offset_mod]
-                # pack
-                if rgbw:
-                    for (b,g,r) in bgr_colors:
-                        data += struct.pack("BBBB", r & 0xFF, g & 0xFF, b & 0xFF, 0)
-                else:
-                    for (b,g,r) in bgr_colors:
-                        data += struct.pack("BBB", r & 0xFF, g & 0xFF, b & 0xFF)
-                total_frames_written += 1
-                frame_idx += 1
-                if frame_idx % 200 == 0:
-                    logger.info(f"Processed {frame_idx} frames...")
-        else:
-            # Oversampling path: perform seeks at each desired timestamp.
-            # get estimated total duration using frame count if possible
-            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-            if frame_count > 0:
-                video_duration_s = frame_count / fps
+        # Fast path: read sequential frames
+        # We already consumed first frame in "first"
+        cap.set(cv2.CAP_PROP_POS_MSEC, 0)
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            ts_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
+            ts_us = int(ts_ms * 1000)
+            data += struct.pack("<Q", ts_us)
+            # extract colors (clockwise starting top-right)
+            # min_lum = os.getenv("AMBILIGHT_MIN_LED_LUMINANCE", "30")
+            # bgr_colors = [_avg_region_bgr(frame, *z, min_lum=min_lum) for z in zones]
+            bgr_colors = [_avg_region_bgr(frame, *z) for z in zones]
+            # apply offset counted from TOP-LEFT, CLOCKWISE: rotate LEFT by offset
+            if offset_mod:
+                bgr_colors = bgr_colors[offset_mod:] + bgr_colors[:offset_mod]
+            # pack
+            if rgbw:
+                for (b,g,r) in bgr_colors:
+                    data += struct.pack("BBBB", r & 0xFF, g & 0xFF, b & 0xFF, 0)
             else:
-                # fallback: read through once to compute duration (rare)
-                cap.set(cv2.CAP_PROP_POS_MSEC, 0)
-                while True:
-                    ret, _ = cap.read()
-                    if not ret:
-                        break
-                video_duration_s = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
-            # iterate desired timestamps
-            t = 0.0
-            sample_idx = 0
-            while t < video_duration_s:
-                cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000.0)
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                ts_us = int(cap.get(cv2.CAP_PROP_POS_MSEC) * 1000)
-                data += struct.pack("<Q", ts_us)
-                bgr_colors = [ _avg_region_bgr(frame, *z) for z in zones ]
-                if offset_mod:
-                    bgr_colors = bgr_colors[offset_mod:] + bgr_colors[:offset_mod]
-                if rgbw:
-                    for (b,g,r) in bgr_colors:
-                        data += struct.pack("BBBB", r & 0xFF, g & 0xFF, b & 0xFF, 0)
-                else:
-                    for (b,g,r) in bgr_colors:
-                        data += struct.pack("BBB", r & 0xFF, g & 0xFF, b & 0xFF)
-                total_frames_written += 1
-                sample_idx += 1
-                if sample_idx % 200 == 0:
-                    logger.info(f"Processed {sample_idx} samples...")
-                t += sample_interval_s
+                for (b,g,r) in bgr_colors:
+                    data += struct.pack("BBB", r & 0xFF, g & 0xFF, b & 0xFF)
+            total_frames_written += 1
+            frame_idx += 1
+            if frame_idx % 200 == 0:
+                logger.info(f"Processed {frame_idx} frames...")
 
         # write file atomically
         out_path = Path(output_file)
@@ -169,7 +124,7 @@ def extract_video_to_binary(video_file, output_file, top=89, bottom=89, left=49,
         with open(out_path, "wb") as f:
             f.write(data)
 
-        logger.info(f"✅ Done! Saved to '{output_file}' ({total_frames_written} frames, fps={fps}, multiplier={multiplier})")
+        logger.info(f"✅ Done! Saved to '{output_file}' ({total_frames_written} frames, fps={fps})")
         return True
     finally:
         cap.release()
@@ -185,7 +140,6 @@ def extract_frames(video_file, jellyfin_item_id):
         offset = int(os.getenv("AMBILIGHT_OFFSET", "46"))
         rgbw = os.getenv("AMBILIGHT_RGBW", "false").lower() in ("1","true","yes")
         border_fraction = float(os.getenv("EXTRACTOR_BORDER_FRACTION", "0.05"))
-        multiplier = float(os.getenv("EXTRACTOR_MULTIPLIER", "1.0"))
         data_dir = Path(os.getenv("AMBILIGHT_DATA_DIR", "./data"))
         binary_dir = data_dir / "binaries"
         data_dir.mkdir(parents=True, exist_ok=True)
@@ -196,8 +150,17 @@ def extract_frames(video_file, jellyfin_item_id):
         return False
 
     try:
-        return extract_video_to_binary(video_file, str(out_path), top=top, bottom=bottom, left=left, right=right,
-                                       offset=offset, rgbw=rgbw, border_fraction=border_fraction, multiplier=multiplier)
+        return extract_video_to_binary(
+            video_file,
+            str(out_path),
+            top=top,
+            bottom=bottom,
+            left=left,
+            right=right,
+            offset=offset,
+            rgbw=rgbw,
+            border_fraction=border_fraction,
+        )
     except Exception as e:
         logger.exception(f"Extraction failed: {e}")
         return False
