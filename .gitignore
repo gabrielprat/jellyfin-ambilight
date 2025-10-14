@@ -1,4 +1,5 @@
 !.gitignore
+.DS_Store
 data/movies
 data/tv
 data/docker-data/*
