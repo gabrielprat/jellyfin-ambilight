@@ -114,10 +114,30 @@ fn main() -> std::io::Result<()> {
     let saturation: f32 = env::var("AMBILIGHT_SATURATION").unwrap_or_else(|_| "1.0".to_string()).parse().unwrap_or(1.0);
     let brightness_target: f32 = env::var("AMBILIGHT_BRIGHTNESS_TARGET").unwrap_or_else(|_| "60.0".to_string()).parse().unwrap_or(60.0);
     let led_order = env::var("AMBILIGHT_ORDER").unwrap_or_else(|_| "RGB".to_string());
+    // per-channel gamma corrections
+    let gamma_red: f32 = env::var("AMBILIGHT_GAMMA_RED").unwrap_or_else(|_| "1.0".to_string()).parse().unwrap_or(1.0);
+    let gamma_green: f32 = env::var("AMBILIGHT_GAMMA_GREEN").unwrap_or_else(|_| "1.0".to_string()).parse().unwrap_or(1.0);
+    let gamma_blue: f32 = env::var("AMBILIGHT_GAMMA_BLUE").unwrap_or_else(|_| "1.0".to_string()).parse().unwrap_or(1.0);
+    // --- Per-channel minimum scaling (environment tunable) ---
+    let red_boost = std::env::var("AMBILIGHT_RED_BOOST")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(3.0); // default: red is ~3× weaker
+
+    let blue_boost = std::env::var("AMBILIGHT_BLUE_BOOST")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(4.0); // default: blue is ~4× weaker
+
+    let green_boost = std::env::var("AMBILIGHT_GREEN_BOOST")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(1.0); // optional fine-tuning
+
     // NEW: minimum LED brightness in 0..255
     let min_led_brightness: f32 = env::var("AMBILIGHT_MIN_LED_BRIGHTNESS").unwrap_or_else(|_| "0.0".to_string()).parse().unwrap_or(0.0);
     // simple time correction (disabled for now)
-    let mut time_correction_s = 0.0;
+    let time_correction_s = 0.0;
 
     let mut i = 1;
     while i < args.len() {
@@ -389,9 +409,10 @@ fn main() -> std::io::Result<()> {
                 let g_n = (g_u / 255.0).max(0.0).min(1.0);
                 let b_n = (b_u / 255.0).max(0.0).min(1.0);
 
-                let r_lin = r_n.powf(g_user);
-                let g_lin = g_n.powf(g_user);
-                let b_lin = b_n.powf(g_user);
+                // inside frame processing loop
+                let r_lin = r_n.powf(gamma_red);
+                let g_lin = g_n.powf(gamma_green);
+                let b_lin = b_n.powf(gamma_blue);
 
                 let (h, s, v) = rgb_to_hsv(r_lin, g_lin, b_lin);
                 let s_new = clamp_f(s * s_user, 0.0, 1.0);
@@ -400,6 +421,7 @@ fn main() -> std::io::Result<()> {
                 let r_g = clamp_f(r_s.powf(inv_gamma), 0.0, 1.0);
                 let g_g = clamp_f(g_s.powf(inv_gamma), 0.0, 1.0);
                 let b_g = clamp_f(b_s.powf(inv_gamma), 0.0, 1.0);
+
 
                 let r_f = r_g * brightness_factor * 255.0;
                 let g_f = g_g * brightness_factor * 255.0;
@@ -413,9 +435,25 @@ fn main() -> std::io::Result<()> {
                 let mut g_out = acc[ib + 1].round();
                 let mut b_out = acc[ib + 2].round();
 
-                // --- APPLY TRUE MIN LED BRIGHTNESS ---
+                // --- APPLY PER-CHANNEL MIN BRIGHTNESS COMPENSATION ---
+                let min_r = min_b * red_boost;
+                let min_g = min_b * green_boost;
+                let min_b_b = min_b * blue_boost;
+
+                // Soft compensation: lift low values proportionally
+                if r_out > 0.0 && r_out < min_r {
+                    r_out = (r_out / min_r) * min_r;
+                }
+                if g_out > 0.0 && g_out < min_g {
+                    g_out = (g_out / min_g) * min_g;
+                }
+                if b_out > 0.0 && b_out < min_b_b {
+                    b_out = (b_out / min_b_b) * min_b_b;
+                }
+
+                // Optional: total blackout if all below perceptual threshold
                 let lum = 0.2126*r_out + 0.7152*g_out + 0.0722*b_out;
-                if lum < min_b {
+                if lum < min_b * 0.5 {
                     r_out = 0.0;
                     g_out = 0.0;
                     b_out = 0.0;
