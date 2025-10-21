@@ -172,7 +172,9 @@ def extract_video_to_binary(video_file, output_file, top=200, bottom=200, left=N
             ret, frame = cap.read()
             if not ret:
                 break
-            ts_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
+            # Calculate frame-accurate timestamp based on frame index and FPS
+            # This ensures consistent, mathematically precise timestamps
+            ts_ms = int((frame_idx / fps) * 1000)
             ts_us = int(ts_ms * 1000)
             data += struct.pack("<Q", ts_us)
             # extract colors (clockwise starting top-left) using edge detection
