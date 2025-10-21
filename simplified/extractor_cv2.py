@@ -14,13 +14,24 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-def _compute_led_zones(frame_shape, counts, border_fraction):
+def _compute_led_zones(frame_shape, counts):
     h, w = frame_shape[:2]
     top_count, bottom_count, left_count, right_count = counts
-    top_h = max(1, int(border_fraction * h))
-    bottom_h = max(1, int(border_fraction * h))
-    left_w = max(1, int(border_fraction * w))
-    right_w = max(1, int(border_fraction * w))
+
+    # Improved edge band sizes for better color capture
+    # Use adaptive sizing based on content importance
+    def clamp(v, lo, hi):
+        return max(lo, min(hi, v))
+
+    # Horizontal edges (top/bottom) — more aggressive edge sampling
+    est_top_spacing = max(1, int(round(w / max(1, top_count))))
+    top_h = clamp(int(round(est_top_spacing * 2.0)), 12, int(h * 0.12))  # Increased from 1.5x to 2.0x and 8% to 12%
+    bottom_h = top_h
+
+    # Vertical edges (left/right) — more aggressive edge sampling
+    est_left_spacing = max(1, int(round(h / max(1, left_count))))
+    left_w = clamp(int(round(est_left_spacing * 2.0)), 12, int(w * 0.12))  # Increased from 1.5x to 2.0x and 8% to 12%
+    right_w = left_w
     zones = []
     # Clockwise starting at TOP-LEFT
     # Top: left → right (start at top-left)
@@ -45,17 +56,82 @@ def _compute_led_zones(frame_shape, counts, border_fraction):
         zones.append((0, y1, left_w, y2))
     return zones
 
-def _avg_region_bgr(frame, x1, y1, x2, y2):
-    """Return pure average BGR values for the region, no gamma/brightness mods."""
+
+def _extract_edge_dominant_color(frame, x1, y1, x2, y2):
+    """
+    Extract dominant color from edge region using improved algorithm.
+    Prioritizes edge pixels and uses perceptual color weighting.
+    """
     region = frame[y1:y2, x1:x2]
     if region.size == 0:
         return (0, 0, 0)
-    # Use simple mean in BGR space
-    m = cv2.mean(region)  # (b, g, r, a)
+
+    # Create edge mask to prioritize edge pixels
+    gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
+
+    # Use adaptive Canny thresholds based on region size
+    h, w = region.shape[:2]
+    min_size = min(h, w)
+    if min_size < 20:
+        low_thresh, high_thresh = 30, 100
+    elif min_size < 50:
+        low_thresh, high_thresh = 40, 120
+    else:
+        low_thresh, high_thresh = 50, 150
+
+    edges = cv2.Canny(gray, low_thresh, high_thresh)
+
+    # If no edges detected, fall back to center-weighted sampling
+    if cv2.countNonZero(edges) < 10:
+        # Use center-weighted approach with edge bias
+        center_y, center_x = h // 2, w // 2
+
+        # Create Gaussian weight mask with edge bias
+        y_coords, x_coords = np.ogrid[:h, :w]
+
+        # Distance from center
+        dist_from_center = np.sqrt((x_coords - center_x)**2 + (y_coords - center_y)**2)
+
+        # Distance from edges (prioritize pixels closer to region edges)
+        dist_from_edges = np.minimum(
+            np.minimum(x_coords, w - 1 - x_coords),
+            np.minimum(y_coords, h - 1 - y_coords)
+        )
+
+        # Combine center and edge weights
+        center_weight = np.exp(-(dist_from_center**2) / (2 * (min(h, w) / 4)**2))
+        edge_weight = np.exp(-(dist_from_edges**2) / (2 * (min(h, w) / 8)**2))
+        weights = (center_weight + edge_weight * 0.5).reshape(h, w, 1)
+
+        # Apply weights and calculate weighted mean
+        weighted_region = region.astype(np.float32) * weights
+        total_weight = np.sum(weights)
+
+        if total_weight > 0:
+            b_mean = np.sum(weighted_region[:, :, 0]) / total_weight
+            g_mean = np.sum(weighted_region[:, :, 1]) / total_weight
+            r_mean = np.sum(weighted_region[:, :, 2]) / total_weight
+            return (int(b_mean), int(g_mean), int(r_mean))
+
+    # Use edge pixels for color extraction
+    edge_pixels = region[edges > 0]
+    if len(edge_pixels) > 0:
+        # Calculate weighted mean based on edge strength
+        edge_strength = edges[edges > 0].astype(np.float32) / 255.0
+
+        # Weight pixels by their edge strength
+        weighted_b = np.sum(edge_pixels[:, 0] * edge_strength) / np.sum(edge_strength)
+        weighted_g = np.sum(edge_pixels[:, 1] * edge_strength) / np.sum(edge_strength)
+        weighted_r = np.sum(edge_pixels[:, 2] * edge_strength) / np.sum(edge_strength)
+
+        return (int(weighted_b), int(weighted_g), int(weighted_r))
+
+    # Fallback to simple mean
+    m = cv2.mean(region)
     return (int(m[0]), int(m[1]), int(m[2]))
 
-def extract_video_to_binary(video_file, output_file, top=89, bottom=89, left=49, right=49,
-                            offset=46, rgbw=False, border_fraction=0.05):
+def extract_video_to_binary(video_file, output_file, top=200, bottom=200, left=None, right=None,
+                            rgbw=False):
     cap = cv2.VideoCapture(video_file)
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open video {video_file}")
@@ -71,21 +147,21 @@ def extract_video_to_binary(video_file, output_file, top=89, bottom=89, left=49,
         if not ret:
             raise RuntimeError("Cannot read first frame")
 
+        # Derive left/right proportionally to aspect ratio if not provided
+        h, w = first.shape[:2]
+        if left is None or right is None:
+            proportional_lr = int(round(top * (h / max(1, w))))
+            left = proportional_lr
+            right = proportional_lr
         counts = (top, bottom, left, right)
-        zones = _compute_led_zones(first.shape, counts, border_fraction)
-        led_count = len(zones)
+        zones = _compute_led_zones(first.shape, counts)
         fmt_word = 1 if rgbw else 0
 
-        safe_led_count = max(1, led_count)
-        offset_mod = offset % safe_led_count
-
-        # Header: "AMBI" + f32 fps + u16 led_count + u16 fmt + u16 offset
+        # Header v2: "AMb2" + f32 fps + u16 top + u16 bottom + u16 left + u16 right + u8 fmt
         data = bytearray()
-        data += struct.pack("<4sfHHH", b"AMBI", float(fps), led_count, fmt_word, offset_mod)
+        data += struct.pack("<4sfHHHHB", b"AMb2", float(fps), top, bottom, left, right, fmt_word)
 
-        # Sampling strategy
-        # desired sample interval in seconds
-        sample_interval_s = 1.0 / fps
+        # Sampling strategy: sequential frames with natural timestamps
         total_frames_written = 0
         frame_idx = 0
 
@@ -99,13 +175,8 @@ def extract_video_to_binary(video_file, output_file, top=89, bottom=89, left=49,
             ts_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
             ts_us = int(ts_ms * 1000)
             data += struct.pack("<Q", ts_us)
-            # extract colors (clockwise starting top-right)
-            # min_lum = os.getenv("AMBILIGHT_MIN_LED_LUMINANCE", "30")
-            # bgr_colors = [_avg_region_bgr(frame, *z, min_lum=min_lum) for z in zones]
-            bgr_colors = [_avg_region_bgr(frame, *z) for z in zones]
-            # apply offset counted from TOP-LEFT, CLOCKWISE: rotate LEFT by offset
-            if offset_mod:
-                bgr_colors = bgr_colors[offset_mod:] + bgr_colors[:offset_mod]
+            # extract colors (clockwise starting top-left) using edge detection
+            bgr_colors = [_extract_edge_dominant_color(frame, *z) for z in zones]
             # pack
             if rgbw:
                 for (b,g,r) in bgr_colors:
@@ -133,13 +204,12 @@ def extract_video_to_binary(video_file, output_file, top=89, bottom=89, left=49,
 # wrapper used by your daemon integration; reads env and calls extractor
 def extract_frames(video_file, jellyfin_item_id):
     try:
-        top = int(os.getenv("AMBILIGHT_TOP_LED_COUNT", "89"))
-        bottom = int(os.getenv("AMBILIGHT_BOTTOM_LED_COUNT", "89"))
-        left = int(os.getenv("AMBILIGHT_LEFT_LED_COUNT", "49"))
-        right = int(os.getenv("AMBILIGHT_RIGHT_LED_COUNT", "49"))
-        offset = int(os.getenv("AMBILIGHT_OFFSET", "46"))
+        # Fixed reference: top/bottom = 200; left/right derived proportionally in extractor
+        top = 200
+        bottom = 200
+        left = None
+        right = None
         rgbw = os.getenv("AMBILIGHT_RGBW", "false").lower() in ("1","true","yes")
-        border_fraction = float(os.getenv("EXTRACTOR_BORDER_FRACTION", "0.05"))
         data_dir = Path(os.getenv("AMBILIGHT_DATA_DIR", "./data"))
         binary_dir = data_dir / "binaries"
         data_dir.mkdir(parents=True, exist_ok=True)
@@ -157,9 +227,7 @@ def extract_frames(video_file, jellyfin_item_id):
             bottom=bottom,
             left=left,
             right=right,
-            offset=offset,
             rgbw=rgbw,
-            border_fraction=border_fraction,
         )
     except Exception as e:
         logger.exception(f"Extraction failed: {e}")

@@ -13,7 +13,7 @@ import time
 import threading
 import signal
 import logging
-import requests
+import requests  # type: ignore
 from urllib.parse import urlparse
 from pathlib import Path
 
@@ -127,11 +127,7 @@ class ExtractorDaemon:
     def _resolve_jellyfin_if_needed(self, force: bool = False):
         if not self._jellyfin_parsed:
             return
-        ttl = int(os.getenv('AMBILIGHT_DNS_TTL_SECONDS', '3600'))
-        disable = os.getenv('AMBILIGHT_DISABLE_DNS_RESOLVE', 'false').lower() == 'true'
-        if disable:
-            self._jellyfin_resolved_ip = None
-            return
+        ttl = int(os.getenv('DNS_TTL_SECONDS', '3600'))
         now = time.time()
         if ttl == 0:
             force = True
@@ -203,7 +199,8 @@ class ExtractorDaemon:
                     "ParentId": lib_id,
                     "Recursive": "true",
                     "IncludeItemTypes": "Movie,Episode,Video",
-                    "Fields": "Path,MediaSources,DateCreated"
+                    # Ask Jellyfin for series-related fields so we can persist them
+                    "Fields": "Path,MediaSources,DateCreated,SeriesName,SeasonName,ParentIndexNumber,IndexNumber,SeasonIndexNumber"
                 },
                 timeout=15
             )
@@ -215,7 +212,25 @@ class ExtractorDaemon:
                 item_type = item.get("Type", "Unknown")
                 created = item.get("DateCreated")
                 filepath = item.get("Path") or (item.get("MediaSources") or [{}])[0].get("Path", "Unknown")
-                self.storage.save_item(item_id, lib_id, title, item_type, filepath, created)
+                # Determine kind/season/episode
+                lower_type = (item_type or "").lower()
+                kind = "Serie" if lower_type in ("episode", "series", "season") else ("Movie" if lower_type == "movie" else item_type)
+                # Jellyfin typically provides IndexNumber (episode) and ParentIndexNumber (season)
+                season_num = item.get("ParentIndexNumber") or item.get("SeasonIndexNumber")
+                episode_num = item.get("IndexNumber")
+                # Fallback: parse from filename like S01E02
+                if kind == "Serie" and (season_num is None or episode_num is None):
+                    try:
+                        import re
+                        m = re.search(r"[sS](\d{1,2})[eE](\d{1,2})", str(filepath))
+                        if m:
+                            if season_num is None:
+                                season_num = int(m.group(1))
+                            if episode_num is None:
+                                episode_num = int(m.group(2))
+                    except Exception:
+                        pass
+                self.storage.save_item(item_id, lib_id, title, item_type, filepath, created, kind=kind, season=season_num, episode=episode_num)
 
     def scan_library_for_new_videos(self):
         logger.info("🔄 Starting library scan (extractor)...")
