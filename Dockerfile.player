@@ -1,5 +1,5 @@
 # Stage 1: Build Rust binary
-FROM rust:1.85 as builder
+FROM mirror.gcr.io/library/rust:1.84 as builder
 
 WORKDIR /usr/src/ambilight-player
 COPY ambilight-player/Cargo.toml ambilight-player/Cargo.lock ./

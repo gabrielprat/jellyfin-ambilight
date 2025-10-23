@@ -18,20 +18,22 @@ def _compute_led_zones(frame_shape, counts):
     h, w = frame_shape[:2]
     top_count, bottom_count, left_count, right_count = counts
 
-    # Improved edge band sizes for better color capture
-    # Use adaptive sizing based on content importance
+    # Calculate consistent band sizes based on LED distribution and screen geometry
     def clamp(v, lo, hi):
         return max(lo, min(hi, v))
 
-    # Horizontal edges (top/bottom) — more aggressive edge sampling
-    est_top_spacing = max(1, int(round(w / max(1, top_count))))
-    top_h = clamp(int(round(est_top_spacing * 2.0)), 12, int(h * 0.12))  # Increased from 1.5x to 2.0x and 8% to 12%
-    bottom_h = top_h
+    # Calculate LED spacing for each edge
+    top_spacing = w / max(1, top_count) if top_count > 0 else w
+    bottom_spacing = w / max(1, bottom_count) if bottom_count > 0 else w
+    left_spacing = h / max(1, left_count) if left_count > 0 else h
+    right_spacing = h / max(1, right_count) if right_count > 0 else h
 
-    # Vertical edges (left/right) — more aggressive edge sampling
-    est_left_spacing = max(1, int(round(h / max(1, left_count))))
-    left_w = clamp(int(round(est_left_spacing * 2.0)), 12, int(w * 0.12))  # Increased from 1.5x to 2.0x and 8% to 12%
-    right_w = left_w
+    # Calculate band sizes based on LED spacing for visual consistency
+    # Use 2x LED spacing for better color capture, with reasonable bounds
+    top_h = clamp(int(round(top_spacing * 2.0)), 12, int(h * 0.12))
+    bottom_h = clamp(int(round(bottom_spacing * 2.0)), 12, int(h * 0.12))
+    left_w = clamp(int(round(left_spacing * 2.0)), 12, int(w * 0.12))
+    right_w = clamp(int(round(right_spacing * 2.0)), 12, int(w * 0.12))
     zones = []
     # Clockwise starting at TOP-LEFT
     # Top: left → right (start at top-left)
@@ -57,20 +59,15 @@ def _compute_led_zones(frame_shape, counts):
     return zones
 
 
-def _extract_edge_dominant_color(frame, x1, y1, x2, y2):
+def _create_combined_weight_mask(region):
     """
-    Extract dominant color from edge region using improved algorithm.
-    Prioritizes edge pixels and uses perceptual color weighting.
+    Create a combined weight mask that prioritizes edges but ensures smooth fallback.
+    Combines Canny edge detection with Gaussian center weighting for robust color extraction.
     """
-    region = frame[y1:y2, x1:x2]
-    if region.size == 0:
-        return (0, 0, 0)
-
-    # Create edge mask to prioritize edge pixels
-    gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
-
-    # Use adaptive Canny thresholds based on region size
     h, w = region.shape[:2]
+
+    # Create edge mask using adaptive Canny thresholds
+    gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
     min_size = min(h, w)
     if min_size < 20:
         low_thresh, high_thresh = 30, 100
@@ -81,62 +78,57 @@ def _extract_edge_dominant_color(frame, x1, y1, x2, y2):
 
     edges = cv2.Canny(gray, low_thresh, high_thresh)
 
-    # If no edges detected, fall back to center-weighted sampling
-    if cv2.countNonZero(edges) < 10:
-        # Use center-weighted approach with edge bias
-        center_y, center_x = h // 2, w // 2
+    # Create center-weighted Gaussian mask
+    center_y, center_x = h // 2, w // 2
+    y_coords, x_coords = np.ogrid[:h, :w]
+    dist_from_center = np.sqrt((x_coords - center_x)**2 + (y_coords - center_y)**2)
+    center_weight = np.exp(-(dist_from_center**2) / (2 * (min(h, w) / 4)**2))
 
-        # Create Gaussian weight mask with edge bias
-        y_coords, x_coords = np.ogrid[:h, :w]
+    # Normalize edge mask to 0-1 range
+    edge_weight = edges.astype(np.float32) / 255.0
 
-        # Distance from center
-        dist_from_center = np.sqrt((x_coords - center_x)**2 + (y_coords - center_y)**2)
+    # Combine edge and center weights with emphasis on edges
+    # Edge weight gets 70% influence, center weight gets 30%
+    combined_weight = (edge_weight * 0.7 + center_weight * 0.3)
 
-        # Distance from edges (prioritize pixels closer to region edges)
-        dist_from_edges = np.minimum(
-            np.minimum(x_coords, w - 1 - x_coords),
-            np.minimum(y_coords, h - 1 - y_coords)
-        )
+    # Ensure minimum weight to avoid division by zero
+    combined_weight = np.maximum(combined_weight, 0.01)
 
-        # Combine center and edge weights
-        center_weight = np.exp(-(dist_from_center**2) / (2 * (min(h, w) / 4)**2))
-        edge_weight = np.exp(-(dist_from_edges**2) / (2 * (min(h, w) / 8)**2))
-        weights = (center_weight + edge_weight * 0.5).reshape(h, w, 1)
+    return combined_weight.reshape(h, w, 1)
 
-        # Apply weights and calculate weighted mean
-        weighted_region = region.astype(np.float32) * weights
-        total_weight = np.sum(weights)
+def _extract_edge_dominant_color(frame, x1, y1, x2, y2):
+    """
+    Extract dominant color using combined edge and center weighting.
+    Provides smooth, continuous color transitions without jarring fallbacks.
+    """
+    region = frame[y1:y2, x1:x2]
+    if region.size == 0:
+        return (0, 0, 0)
 
-        if total_weight > 0:
-            b_mean = np.sum(weighted_region[:, :, 0]) / total_weight
-            g_mean = np.sum(weighted_region[:, :, 1]) / total_weight
-            r_mean = np.sum(weighted_region[:, :, 2]) / total_weight
-            return (int(b_mean), int(g_mean), int(r_mean))
+    # Create combined weight mask
+    weights = _create_combined_weight_mask(region)
 
-    # Use edge pixels for color extraction
-    edge_pixels = region[edges > 0]
-    if len(edge_pixels) > 0:
-        # Calculate weighted mean based on edge strength
-        edge_strength = edges[edges > 0].astype(np.float32) / 255.0
+    # Apply weights and calculate weighted mean
+    weighted_region = region.astype(np.float32) * weights
+    total_weight = np.sum(weights)
 
-        # Weight pixels by their edge strength
-        weighted_b = np.sum(edge_pixels[:, 0] * edge_strength) / np.sum(edge_strength)
-        weighted_g = np.sum(edge_pixels[:, 1] * edge_strength) / np.sum(edge_strength)
-        weighted_r = np.sum(edge_pixels[:, 2] * edge_strength) / np.sum(edge_strength)
+    if total_weight > 0:
+        b_mean = np.sum(weighted_region[:, :, 0]) / total_weight
+        g_mean = np.sum(weighted_region[:, :, 1]) / total_weight
+        r_mean = np.sum(weighted_region[:, :, 2]) / total_weight
+        return (int(b_mean), int(g_mean), int(r_mean))
 
-        return (int(weighted_b), int(weighted_g), int(weighted_r))
-
-    # Fallback to simple mean
+    # Fallback to simple mean (should rarely be needed)
     m = cv2.mean(region)
     return (int(m[0]), int(m[1]), int(m[2]))
 
 def extract_video_to_binary(video_file, output_file, top=200, bottom=200, left=None, right=None,
                             rgbw=False):
-    cap = cv2.VideoCapture(video_file)
-    if not cap.isOpened():
-        raise RuntimeError(f"Cannot open video {video_file}")
-
+    cap = None
     try:
+        cap = cv2.VideoCapture(video_file)
+        if not cap.isOpened():
+            raise RuntimeError(f"Cannot open video {video_file}")
         fps = cap.get(cv2.CAP_PROP_FPS)
         if not fps or fps <= 0:
             fps = 24.0
@@ -147,13 +139,21 @@ def extract_video_to_binary(video_file, output_file, top=200, bottom=200, left=N
         if not ret:
             raise RuntimeError("Cannot read first frame")
 
-        # Derive left/right proportionally to aspect ratio if not provided
+        # Derive left/right counts for visually balanced LED distribution
         h, w = first.shape[:2]
         if left is None or right is None:
-            proportional_lr = int(round(top * (h / max(1, w))))
+            # Calculate based on perimeter ratio for visual balance
+            # This approach assumes we want proportional LED density around the screen perimeter
+            # rather than equal LED counts on each side. This provides better visual balance
+            # especially for wide/tall screens where equal counts would look uneven.
+            vertical_perimeter_share = (2 * h) / (2 * (h + w))  # vertical portion of perimeter
+            horizontal_leds = top + bottom  # total horizontal LEDs
+            # Distribute vertical LEDs based on perimeter ratio for balanced appearance
+            proportional_lr = int(round(horizontal_leds * vertical_perimeter_share))
             left = proportional_lr
             right = proportional_lr
         counts = (top, bottom, left, right)
+        logger.info(f"LED distribution: top={top}, bottom={bottom}, left={left}, right={right} (total={sum(counts)})")
         zones = _compute_led_zones(first.shape, counts)
         fmt_word = 1 if rgbw else 0
 
@@ -172,10 +172,9 @@ def extract_video_to_binary(video_file, output_file, top=200, bottom=200, left=N
             ret, frame = cap.read()
             if not ret:
                 break
-            # Calculate frame-accurate timestamp based on frame index and FPS
-            # This ensures consistent, mathematically precise timestamps
-            ts_ms = int((frame_idx / fps) * 1000)
-            ts_us = int(ts_ms * 1000)
+            # Calculate frame-accurate timestamp in microseconds directly
+            # This ensures consistent, mathematically precise timestamps without rounding errors
+            ts_us = int((frame_idx / fps) * 1_000_000)
             data += struct.pack("<Q", ts_us)
             # extract colors (clockwise starting top-left) using edge detection
             bgr_colors = [_extract_edge_dominant_color(frame, *z) for z in zones]
@@ -191,16 +190,33 @@ def extract_video_to_binary(video_file, output_file, top=200, bottom=200, left=N
             if frame_idx % 200 == 0:
                 logger.info(f"Processed {frame_idx} frames...")
 
-        # write file atomically
+        # write file atomically using temporary file
         out_path = Path(output_file)
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(out_path, "wb") as f:
-            f.write(data)
 
-        logger.info(f"✅ Done! Saved to '{output_file}' ({total_frames_written} frames, fps={fps})")
-        return True
+        # Create temporary file in the same directory to ensure atomic rename
+        temp_path = out_path.with_suffix(out_path.suffix + '.tmp')
+
+        try:
+            # Write to temporary file first
+            with open(temp_path, "wb") as f:
+                f.write(data)
+
+            # Atomically rename temporary file to final destination
+            temp_path.replace(out_path)
+
+            logger.info(f"✅ Done! Saved to '{output_file}' ({total_frames_written} frames, fps={fps})")
+            return True
+
+        except Exception as e:
+            # Clean up temporary file if something went wrong
+            if temp_path.exists():
+                temp_path.unlink()
+            raise e
     finally:
-        cap.release()
+        # Ensure VideoCapture is properly released
+        if cap is not None:
+            cap.release()
 
 
 # wrapper used by your daemon integration; reads env and calls extractor

@@ -1,4 +1,3 @@
-import os
 import subprocess
 import threading
 import time
@@ -102,3 +101,21 @@ class AmbilightBinaryPlayer:
                     return
                 except Exception as e:
                     logger.warning(f"⚠️ Failed to send RESUME: {e}")
+
+    def beat(self, position_seconds: float, epoch_seconds: float | None = None):
+        """
+        Send a heartbeat to the Rust player with current video position and the
+        wall-clock epoch when that position was measured. The Rust side will
+        compensate transit/processing delay using the epoch.
+        """
+        if epoch_seconds is None:
+            epoch_seconds = time.time()
+        with self._lock:
+            if self._proc and self._proc.poll() is None and self._proc.stdin:
+                try:
+                    cmd = f"BEAT {position_seconds} {epoch_seconds}\n".encode("utf-8")
+                    self._proc.stdin.write(cmd)
+                    self._proc.stdin.flush()
+                except Exception:
+                    # Heartbeats are best-effort; ignore failures
+                    pass

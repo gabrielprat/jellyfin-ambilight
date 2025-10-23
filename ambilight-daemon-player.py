@@ -15,7 +15,7 @@ import threading
 import socket
 import signal
 import logging
-import requests
+import requests  # type: ignore
 from urllib.parse import urlparse
 from pathlib import Path
 from typing import Dict
@@ -34,9 +34,7 @@ WLED_HOST = os.getenv('WLED_HOST', 'wled-ambilight-lgc1.lan')
 WLED_UDP_RAW_PORT = int(os.getenv('WLED_UDP_RAW_PORT', '19446'))
 AMBILIGHT_DATA_DIR = os.getenv("AMBILIGHT_DATA_DIR", "/app/data/ambilight")
 PLAYBACK_MONITOR_INTERVAL = float(os.getenv('PLAYBACK_MONITOR_INTERVAL', '0.2'))
-AMBILIGHT_DNS_TTL_SECONDS = int(os.getenv('AMBILIGHT_DNS_TTL_SECONDS', '3600'))
-AMBILIGHT_DISABLE_DNS_RESOLVE = os.getenv('AMBILIGHT_DISABLE_DNS_RESOLVE', 'false').lower() == 'true'
-JELLYFIN_DEVICE_FILTER = os.getenv("JELLYFIN_DEVICE_FILTER", "").strip().lower()
+DNS_TTL_SECONDS = int(os.getenv('DNS_TTL_SECONDS', '3600'))
 # Device → WLED mapping
 DEVICE_MATCH_FIELD = os.getenv("DEVICE_MATCH_FIELD", "DeviceName").strip()
 
@@ -61,6 +59,7 @@ class PlayerDaemon:
         self._players: Dict[str, AmbilightBinaryPlayer] = {}
         self._threads: Dict[str, threading.Thread] = {}
         self._session_state: Dict[str, Dict] = {}
+        self._last_resync: Dict[str, float] = {}  # Track last resync time per session
         # Track items we already warned about missing binary
         self._no_binary_notified: set[str] = set()
         # Normalization helper for identifiers and device names
@@ -77,8 +76,7 @@ class PlayerDaemon:
             device_field = DEVICE_MATCH_FIELD
             udp_port = WLED_UDP_RAW_PORT
             wled_host = WLED_HOST
-            dns_ttl = AMBILIGHT_DNS_TTL_SECONDS
-            dns_disabled = AMBILIGHT_DISABLE_DNS_RESOLVE
+            dns_ttl = DNS_TTL_SECONDS
 
             print("\n⚙️  AMBILIGHT PLAYER CONFIGURATION")
             print("=" * 60)
@@ -89,7 +87,6 @@ class PlayerDaemon:
             print(f"Device Match Field       : {device_field}")
             print(f"WLED Default Host        : {wled_host}")
             print(f"WLED UDP RAW Port        : {udp_port}")
-            print(f"DNS Resolve Disabled     : {dns_disabled}")
             print(f"DNS Cache TTL (sec)      : {dns_ttl}")
 
             # List WLED_DEVICE_* mappings
@@ -105,15 +102,15 @@ class PlayerDaemon:
 
     # DNS helpers
     def _resolve_host_cached(self, host: str, udp: bool = False) -> str | None:
-        if AMBILIGHT_DISABLE_DNS_RESOLVE:
-            return None
         family = socket.AF_INET
         typ = socket.SOCK_DGRAM if udp else socket.SOCK_STREAM
-        ttl = AMBILIGHT_DNS_TTL_SECONDS
+        ttl = DNS_TTL_SECONDS
         now = time.time()
         cache_ip = self._wled_resolved_ip if udp else self._jellyfin_resolved_ip
         cache_ts = self._wled_last_resolve_ts if udp else self._jellyfin_last_resolve_ts
-        if ttl != 0 and cache_ip and (now - cache_ts) < ttl:
+        if ttl == 0:
+            return None
+        elif cache_ip and (now - cache_ts) < ttl:
             return cache_ip
         try:
             infos = socket.getaddrinfo(host, None, family=family, type=typ)
@@ -202,24 +199,14 @@ class PlayerDaemon:
             r = requests.get(f"{base}/Sessions", headers=headers, timeout=8)
             r.raise_for_status()
             sessions = r.json()
-            # if not sessions:
-            #     logger.info("/Sessions returned 0 sessions")
-            # else:
-            #     logger.info(f"/Sessions returned {len(sessions)} sessions")
             videos = []
             for s in sessions:
-                device_name = s.get("DeviceName", "")
-                user_name = s.get("UserName", "")
+                # device_name = s.get("DeviceName", "")
+                # user_name = s.get("UserName", "")
                 now_playing = s.get("NowPlayingItem")
-                np_type = (now_playing or {}).get("Type") if now_playing else None
-                # logger.info(f"Session id={s.get('Id')} device='{device_name}' user='{user_name}' now_playing={bool(now_playing)} type={np_type}")
-                # Do not pre-filter by JELLYFIN_DEVICE_FILTER here; gating is done via WLED_DEVICE_* mapping later
+                # np_type = (now_playing or {}).get("Type") if now_playing else None
                 if now_playing and now_playing.get("Type") in ["Movie", "Episode", "Video"]:
                     videos.append(s)
-            # if videos:
-            #     logger.info(f"Playable sessions detected: {len(videos)}")
-            # else:
-            #     logger.info("No playable sessions detected in this poll")
             return videos
         except Exception as e:
             logger.error(f"get_sessions failed: {e}")
@@ -346,8 +333,24 @@ class PlayerDaemon:
                                 # Only resync on large position jumps (seeks), not normal playback progression
                                 position_jump = abs(pos_s - prev_pos)
                                 if position_jump > 2.0:  # Only resync on large seeks (>2s jump)
-                                    logger.info(f"⏩ Seek detected: {fmt_ts(prev_pos)} → {fmt_ts(pos_s)} (jump={position_jump:.1f}s)")
-                                    self._resync_player(sid, pos_s)
+                                    # Debounce resyncs to prevent rapid successive resyncs
+                                    current_time = time.time()
+                                    last_resync = self._last_resync.get(sid, 0)
+                                    if current_time - last_resync > 2.0:  # Minimum 2s between resyncs
+                                        logger.info(f"⏩ Seek detected: {fmt_ts(prev_pos)} → {fmt_ts(pos_s)} (jump={position_jump:.1f}s)")
+                                        self._resync_player(sid, pos_s)
+                                        self._last_resync[sid] = current_time
+                                    else:
+                                        logger.debug(f"⏩ Seek detected but debounced: {fmt_ts(prev_pos)} → {fmt_ts(pos_s)} (jump={position_jump:.1f}s)")
+                                # Send heartbeat to Rust for fine-grained drift correction
+                                # Only send beat if position has changed significantly to reduce noise
+                                if abs(pos_s - prev_pos) > 0.1:  # Only send beat if position changed by >0.1s
+                                    try:
+                                        player = self._players.get(sid)
+                                        if player:
+                                            player.beat(pos_s, time.time())
+                                    except Exception:
+                                        pass
                         else:
                             # Only pause if transitioning from playing to paused
                             if sid in self._players and prev_is_playing:
