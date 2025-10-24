@@ -212,6 +212,14 @@ fn main() -> std::io::Result<()> {
     let mut ema_acc: Option<Vec<f32>> = None;
     let smooth_tau = clamp_f(smooth_seconds, 0.001, 5.0);
 
+    // Frame rate monitoring for better sync
+    let mut frame_times: Vec<Instant> = Vec::new();
+    let mut last_frame_time = Instant::now();
+
+    // Dynamic processing latency measurement
+    let mut processing_latencies: Vec<f64> = Vec::new();
+    let mut processing_start_time = Instant::now();
+
     let seek_target: Arc<Mutex<Option<f64>>> = Arc::new(Mutex::new(None));
     let paused_flag: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
     // Heartbeat shared storage: (video_pos_seconds, optional_epoch_seconds, received_instant)
@@ -322,7 +330,41 @@ fn main() -> std::io::Result<()> {
         let target_rel_s = rel_s - time_correction_s - sync_lead;
         let target_time = if target_rel_s > 0.0 { Duration::from_secs_f64(target_rel_s) } else { Duration::from_millis(0) };
         let elapsed = elapsed_base + start_instant.elapsed();
-        if elapsed < target_time { sleep(target_time - elapsed); }
+
+        // Enhanced timing with microsecond precision
+        if elapsed < target_time {
+            let sleep_duration = target_time - elapsed;
+            // Use more precise sleep for better sync
+            if sleep_duration > Duration::from_millis(1) {
+                sleep(sleep_duration);
+            } else if sleep_duration > Duration::from_micros(100) {
+                // For very short sleeps, use thread::yield_now() to avoid OS scheduler delays
+                std::thread::yield_now();
+            }
+        }
+
+        // Start processing latency measurement
+        processing_start_time = Instant::now();
+
+        // Monitor frame rate for sync optimization
+        let current_time = Instant::now();
+        frame_times.push(current_time);
+        if frame_times.len() > 30 { frame_times.remove(0); } // Keep last 30 frames
+
+        // Calculate actual FPS from recent frames
+        if frame_times.len() > 1 {
+            let recent_duration = frame_times.last().unwrap().duration_since(frame_times[0]).as_secs_f64();
+            let actual_fps = if recent_duration > 0.0 { (frame_times.len() - 1) as f64 / recent_duration } else { fps };
+
+            // Adjust timing if actual FPS differs significantly from expected
+            if (actual_fps - fps).abs() > 1.0 && frame_times.len() > 10 {
+                let fps_ratio = fps / actual_fps;
+                time_correction_s += (fps_ratio - 1.0) * 0.1; // Gradual FPS correction
+                if debug_enabled {
+                    eprintln!("📊 FPS adjustment: expected {:.2}, actual {:.2}, ratio {:.3}", fps, actual_fps, fps_ratio);
+                }
+            }
+        }
 
         let raw = &frames[frame_index];
 
@@ -488,27 +530,63 @@ fn main() -> std::io::Result<()> {
             }
         }
 
-        // Drift correction using last heartbeat from Python
+        // Measure and store processing latency
+        let processing_duration = processing_start_time.elapsed().as_secs_f64();
+        processing_latencies.push(processing_duration);
+        if processing_latencies.len() > 20 { processing_latencies.remove(0); } // Keep last 20 measurements
+
+        // Calculate dynamic processing latency (median of recent measurements)
+        let mut sorted_latencies = processing_latencies.clone();
+        sorted_latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let median_latency = if sorted_latencies.len() > 0 {
+            let mid = sorted_latencies.len() / 2;
+            if sorted_latencies.len() % 2 == 0 {
+                (sorted_latencies[mid - 1] + sorted_latencies[mid]) / 2.0
+            } else {
+                sorted_latencies[mid]
+            }
+        } else {
+            0.005 // Fallback to 5ms if no measurements yet
+        };
+
+        // Periodic latency reporting (every 100 frames)
+        if frame_index % 100 == 0 && processing_latencies.len() > 5 {
+            let min_latency = processing_latencies.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+            let max_latency = processing_latencies.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+            let avg_latency = processing_latencies.iter().sum::<f64>() / processing_latencies.len() as f64;
+
+            if debug_enabled {
+                eprintln!("📊 Processing latency: median {:.1}ms, avg {:.1}ms, min {:.1}ms, max {:.1}ms (samples: {})",
+                         median_latency * 1000.0, avg_latency * 1000.0, min_latency * 1000.0, max_latency * 1000.0, processing_latencies.len());
+            }
+        }
+
+        // Enhanced drift correction with better timing precision
         if let Some((beat_pos, beat_epoch_opt, beat_instant)) = beat_shared.lock().ok().and_then(|g| (*g).clone()) {
-            // Compute our current playback position in seconds since start_frame
+            // Use high-precision timing for better sync
+            let now = Instant::now();
+            let elapsed_since_beat = beat_instant.elapsed().as_secs_f64();
+
+            // Compute our current playback position with frame-accurate timestamps
             let rel_us_now = if frame_index < timestamps_us.len() && start_frame < timestamps_us.len() {
                 timestamps_us[frame_index].saturating_sub(timestamps_us[start_frame])
             } else {
                 ((frame_index - start_frame) as f64 * (1.0 / fps) * 1_000_000.0) as u64
             };
             let our_pos = (rel_us_now as f64) / 1_000_000.0;
-            // Predict where video should be now using beat epoch and elapsed wall time from beat
-            let predicted_video_pos = {
-                let elapsed_since_beat = beat_instant.elapsed().as_secs_f64();
-                beat_pos + elapsed_since_beat
-            };
+
+            // Predict where video should be now with higher precision
+            let predicted_video_pos = beat_pos + elapsed_since_beat;
             let slip = our_pos - predicted_video_pos;
 
+            // Use dynamic processing latency compensation
+            let compensated_slip = slip - median_latency;
+
             // Only apply drift correction if slip is significant and not too large
-            if slip.abs() > drift_threshold && slip.abs() < max_drift_correction {
-                // Apply gradual correction instead of abrupt jumping
-                let correction_factor = 0.3; // Gradual correction (30% per frame)
-                let correction = slip * correction_factor;
+            if compensated_slip.abs() > drift_threshold && compensated_slip.abs() < max_drift_correction {
+                // Apply gradual correction with adaptive factor based on slip magnitude
+                let correction_factor = if compensated_slip.abs() > 0.1 { 0.5 } else { 0.2 }; // More aggressive for larger drifts
+                let correction = compensated_slip * correction_factor;
 
                 // Adjust timing gradually
                 time_correction_s += correction;
@@ -516,12 +594,12 @@ fn main() -> std::io::Result<()> {
                 // Clamp correction to prevent oscillation
                 time_correction_s = clamp_f(time_correction_s as f32, -2.0, 2.0) as f64;
 
-                eprintln!("🛠️  Drift {:.3}s detected, applying gradual correction {:.3}s (total correction: {:.3}s)",
-                         slip, correction, time_correction_s);
+                eprintln!("🛠️  Drift {:.3}s detected (raw: {:.3}s, compensated: {:.3}s), applying gradual correction {:.3}s (total correction: {:.3}s, latency: {:.1}ms)",
+                         compensated_slip, slip, compensated_slip, correction, time_correction_s, median_latency * 1000.0);
 
                 // Clear beat after applying correction to prevent immediate re-correction
                 if let Ok(mut g) = beat_shared.lock() { *g = None; }
-            } else if slip.abs() > max_drift_correction {
+            } else if compensated_slip.abs() > max_drift_correction {
                 // For very large drifts, do a full resync but more carefully
                 let new_target = (our_pos - slip).max(0.0);
                 let target_us = (new_target * 1_000_000.0) as u64;
