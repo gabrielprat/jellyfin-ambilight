@@ -8,11 +8,42 @@ Environment-driven wrapper provided in extract_frames() at bottom.
 import os
 import struct
 import logging
+import shutil
 from pathlib import Path
 import cv2
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+def _check_disk_space(output_path: Path, required_gb: float = 2.0) -> bool:
+    """
+    Check if there's enough free disk space for extraction.
+
+    Args:
+        output_path: Path where the output file will be written
+        required_gb: Minimum required free space in GB
+
+    Returns:
+        True if enough space is available, False otherwise
+    """
+    try:
+        # Get the disk usage for the output directory
+        total, used, free = shutil.disk_usage(output_path.parent)
+
+        # Convert bytes to GB
+        free_gb = free / (1024**3)
+
+        if free_gb < required_gb:
+            logger.warning(f"❌ Insufficient disk space: {free_gb:.2f}GB available, {required_gb}GB required")
+            logger.warning(f"   Output directory: {output_path.parent}")
+            return False
+
+        logger.debug(f"✅ Disk space check passed: {free_gb:.2f}GB available (required: {required_gb}GB)")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to check disk space: {e}")
+        return False
 
 def _compute_led_zones(frame_shape, counts):
     h, w = frame_shape[:2]
@@ -122,8 +153,14 @@ def _extract_edge_dominant_color(frame, x1, y1, x2, y2):
     m = cv2.mean(region)
     return (int(m[0]), int(m[1]), int(m[2]))
 
-def extract_video_to_binary(video_file, output_file, top=200, bottom=200, left=None, right=None,
+def extract_video_to_binary(video_file, output_file, top=150, bottom=150, left=None, right=None,
                             rgbw=False):
+    # Check disk space before starting extraction
+    output_path = Path(output_file)
+    if not _check_disk_space(output_path):
+        logger.error("❌ Extraction aborted due to insufficient disk space")
+        return False
+
     cap = None
     try:
         cap = cv2.VideoCapture(video_file)
@@ -222,9 +259,9 @@ def extract_video_to_binary(video_file, output_file, top=200, bottom=200, left=N
 # wrapper used by your daemon integration; reads env and calls extractor
 def extract_frames(video_file, jellyfin_item_id):
     try:
-        # Fixed reference: top/bottom = 200; left/right derived proportionally in extractor
-        top = 200
-        bottom = 200
+        # Fixed reference: top/bottom = 150; left/right derived proportionally in extractor
+        top = 150
+        bottom = 150
         left = None
         right = None
         rgbw = os.getenv("AMBILIGHT_RGBW", "false").lower() in ("1","true","yes")
