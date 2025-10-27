@@ -17,6 +17,27 @@ class AmbilightBinaryPlayer:
         self.port = port
         self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
+        self._heartbeat_thread: threading.Thread | None = None
+        self._heartbeat_stop_event = threading.Event()
+        self._current_position = 0.0
+        self._position_lock = threading.Lock()
+
+    def _heartbeat_worker(self):
+        """Background thread that sends periodic heartbeats while playing."""
+        while not self._heartbeat_stop_event.is_set():
+            try:
+                with self._position_lock:
+                    current_pos = self._current_position
+
+                # Send heartbeat with current position and precise epoch
+                self.beat(current_pos, time.time())
+
+                # Wait 0.5 seconds before next heartbeat
+                if self._heartbeat_stop_event.wait(0.5):
+                    break
+            except Exception as e:
+                logger.debug(f"Heartbeat thread error: {e}")
+                break
 
     def play(self, start_time: float = 0.0):
         """Start playing from the beginning or a given timestamp."""
@@ -40,9 +61,24 @@ class AmbilightBinaryPlayer:
             # Open with stdin pipe to support live SEEK commands
             self._proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
 
+            # Start heartbeat thread for continuous sync
+            self._heartbeat_stop_event.clear()
+            self._heartbeat_thread = threading.Thread(target=self._heartbeat_worker, daemon=True)
+            self._heartbeat_thread.start()
+
+            # Update current position
+            with self._position_lock:
+                self._current_position = start_time
+
     def stop(self):
         """Stop playback gracefully."""
         with self._lock:
+            # Stop heartbeat thread first
+            if self._heartbeat_thread:
+                self._heartbeat_stop_event.set()
+                self._heartbeat_thread.join(timeout=1.0)
+                self._heartbeat_thread = None
+
             if self._proc:
                 logger.info("🛑 Stopping Rust player...")
                 self._proc.terminate()
@@ -58,25 +94,10 @@ class AmbilightBinaryPlayer:
 
     def resync(self, position_seconds: float):
         """
-        Simulate seek/resync by restarting the player from the new timestamp.
-        Ideal when the video position changes (seek or resume).
+        Disabled resync functionality - using simple sync approach.
         """
-        logger.info(f"🔄 Resync requested to {position_seconds:.2f}s — sending SEEK to Rust player.")
-        with self._lock:
-            if self._proc and self._proc.poll() is None and self._proc.stdin:
-                try:
-                    cmd = f"SEEK {position_seconds}\n".encode("utf-8")
-                    self._proc.stdin.write(cmd)
-                    self._proc.stdin.flush()
-                    logger.info("✅ SEEK command sent.")
-                    return
-                except Exception as e:
-                    logger.warning(f"⚠️ Failed to send SEEK: {e}; falling back to restart.")
-            # Fallback: restart
-            self.stop()
-            time.sleep(0.2)
-            self.play(start_time=position_seconds)
-            logger.info(f"✅ Resync complete via restart from {position_seconds:.2f}s.")
+        logger.debug(f"🔄 Resync requested to {position_seconds:.2f}s (disabled)")
+        return
 
     def pause(self):
         """Send PAUSE to Rust player."""
@@ -110,12 +131,19 @@ class AmbilightBinaryPlayer:
         """
         if epoch_seconds is None:
             epoch_seconds = time.time()
+
+        # Update current position for heartbeat thread
+        with self._position_lock:
+            self._current_position = position_seconds
+
         with self._lock:
             if self._proc and self._proc.poll() is None and self._proc.stdin:
                 try:
                     cmd = f"BEAT {position_seconds} {epoch_seconds}\n".encode("utf-8")
                     self._proc.stdin.write(cmd)
                     self._proc.stdin.flush()
+                    # Add small delay to prevent overwhelming the Rust player
+                    time.sleep(0.001)  # 1ms delay to prevent command flooding
                 except Exception:
                     # Heartbeats are best-effort; ignore failures
                     pass

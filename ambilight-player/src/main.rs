@@ -96,8 +96,9 @@ fn main() -> std::io::Result<()> {
     let ref_epoch = cli.ref_epoch;
 
     // runtime envs (kept most names identical)
-    let sync_lead = env::var("AMBILIGHT_SYNC_LEAD_SECONDS").unwrap_or_else(|_| "0.0".to_string())
+    let base_sync_lead = env::var("AMBILIGHT_SYNC_LEAD_SECONDS").unwrap_or_else(|_| "0.0".to_string())
         .parse::<f64>().unwrap_or(0.2);
+    let mut adaptive_sync_lead = base_sync_lead;
     let smooth_seconds: f32 = env::var("AMBILIGHT_SMOOTH_SECONDS").unwrap_or_else(|_| "0.12".to_string()).parse().unwrap_or(0.12);
     let gamma_base: f32 = env::var("AMBILIGHT_GAMMA").unwrap_or_else(|_| "2.2".to_string()).parse().unwrap_or(2.2);
     let saturation: f32 = env::var("AMBILIGHT_SATURATION").unwrap_or_else(|_| "1.0".to_string()).parse().unwrap_or(1.0);
@@ -185,7 +186,7 @@ fn main() -> std::io::Result<()> {
 
     // socket
     let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind UDP socket");
-    socket.set_nonblocking(false).ok();
+    socket.set_nonblocking(true).ok(); // Non-blocking for better performance
     let remote = format!("{}:{}", host, port);
     socket.connect(&remote).expect("Failed to connect to WLED");
     println!("🔍 Socket local: {:?}", socket.local_addr());
@@ -196,7 +197,7 @@ fn main() -> std::io::Result<()> {
         (now_epoch - re).max(0.0)
     } else { 0.0 };
 
-    let effective_start = (start_time + launch_delta + sync_lead).max(0.0);
+    let effective_start = (start_time + launch_delta + adaptive_sync_lead).max(0.0);
     let start_ts_us = (effective_start * 1_000_000.0) as u64;
     let mut start_frame = 0usize;
     while start_frame < timestamps_us.len() && timestamps_us[start_frame] < start_ts_us { start_frame += 1; }
@@ -206,19 +207,15 @@ fn main() -> std::io::Result<()> {
     let mut elapsed_base = Duration::from_millis(0);
     let mut last_paused = false;
 
-    let mut time_correction_s: f64 = 0.0;
-    let mut first_calibrated = false;
+    // Processing latency measurement with EMA
+    let mut processing_latency_ema: f64 = 0.0;
+    let processing_ema_alpha = 0.1; // EMA smoothing factor
+    let mut first_processing_measurement = true;
+
+    // Simplified sync - no complex epoch mapping needed
 
     let mut ema_acc: Option<Vec<f32>> = None;
     let smooth_tau = clamp_f(smooth_seconds, 0.001, 5.0);
-
-    // Frame rate monitoring for better sync
-    let mut frame_times: Vec<Instant> = Vec::new();
-    let mut last_frame_time = Instant::now();
-
-    // Dynamic processing latency measurement
-    let mut processing_latencies: Vec<f64> = Vec::new();
-    let mut processing_start_time = Instant::now();
 
     let seek_target: Arc<Mutex<Option<f64>>> = Arc::new(Mutex::new(None));
     let paused_flag: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
@@ -267,24 +264,20 @@ fn main() -> std::io::Result<()> {
         });
     }
 
-    println!("▶️ Starting playback from frame {} (lead={:.3}s)", frame_index, sync_lead);
+    println!("▶️ Starting playback from frame {} (lead={:.3}s)", frame_index, adaptive_sync_lead);
 
-    // Heartbeat-based drift correction
-    let drift_threshold: f64 = 0.3; // seconds - increased to reduce sensitivity
-    let max_drift_correction: f64 = 1.0; // seconds - limit maximum correction per frame
+    // Simplified sync - no complex drift correction needed
     while running.load(Ordering::SeqCst) && frame_index < frames.len() {
         // seek handling
         if let Ok(mut tgt) = seek_target.lock() {
             if let Some(sec) = *tgt {
-                let target_us = ((sec + sync_lead) * 1_000_000.0) as u64;
+                let target_us = ((sec + adaptive_sync_lead) * 1_000_000.0) as u64;
                 let mut target_frame = 0usize;
                 while target_frame < timestamps_us.len() && timestamps_us[target_frame] < target_us { target_frame += 1; }
                 frame_index = target_frame.min(frames.len());
                 start_frame = frame_index.min(frames.len());
                 start_instant = Instant::now();
                 elapsed_base = Duration::from_millis(0);
-                first_calibrated = false;
-                time_correction_s = 0.0;
                 eprintln!("🔄 SEEK to {:.3}s → frame {}", sec, frame_index);
                 *tgt = None;
             }
@@ -320,51 +313,38 @@ fn main() -> std::io::Result<()> {
             // reset blank flag (unsafe used above) - safe no-op here
         }
 
-        // timing
-        let rel_us = if frame_index < timestamps_us.len() && start_frame < timestamps_us.len() {
-            timestamps_us[frame_index].saturating_sub(timestamps_us[start_frame])
+        // Simplified timing: Use frame-accurate timestamps directly
+        let frame_timestamp_us = if frame_index < timestamps_us.len() {
+            timestamps_us[frame_index]
         } else {
-            ((frame_index - start_frame) as f64 * (1.0 / fps) * 1_000_000.0) as u64
+            // Fallback to calculated timestamp if we're beyond the data
+            let calculated_us = ((frame_index as f64) / fps * 1_000_000.0) as u64;
+            calculated_us
         };
-        let rel_s = (rel_us as f64) / 1_000_000.0;
-        let target_rel_s = rel_s - time_correction_s - sync_lead;
-        let target_time = if target_rel_s > 0.0 { Duration::from_secs_f64(target_rel_s) } else { Duration::from_millis(0) };
-        let elapsed = elapsed_base + start_instant.elapsed();
 
-        // Enhanced timing with microsecond precision
-        if elapsed < target_time {
-            let sleep_duration = target_time - elapsed;
-            // Use more precise sleep for better sync
-            if sleep_duration > Duration::from_millis(1) {
-                sleep(sleep_duration);
-            } else if sleep_duration > Duration::from_micros(100) {
-                // For very short sleeps, use thread::yield_now() to avoid OS scheduler delays
-                std::thread::yield_now();
+        // Calculate when this frame should be displayed (absolute time since start)
+        let frame_target_time_us = if start_frame < timestamps_us.len() {
+            frame_timestamp_us.saturating_sub(timestamps_us[start_frame])
+        } else {
+            ((frame_index - start_frame) as f64 / fps * 1_000_000.0) as u64
+        };
+
+        let frame_target_time = Duration::from_micros(frame_target_time_us);
+        let elapsed_since_start = elapsed_base + start_instant.elapsed();
+
+        // Sleep until frame time, compensating for processing latency
+        if elapsed_since_start < frame_target_time {
+            let mut sleep_duration = frame_target_time - elapsed_since_start;
+            // Subtract processing latency to maintain consistent timing
+            let processing_compensation = Duration::from_secs_f64(processing_latency_ema);
+            if sleep_duration > processing_compensation {
+                sleep_duration -= processing_compensation;
             }
+            sleep(sleep_duration);
         }
 
         // Start processing latency measurement
-        processing_start_time = Instant::now();
-
-        // Monitor frame rate for sync optimization
-        let current_time = Instant::now();
-        frame_times.push(current_time);
-        if frame_times.len() > 30 { frame_times.remove(0); } // Keep last 30 frames
-
-        // Calculate actual FPS from recent frames
-        if frame_times.len() > 1 {
-            let recent_duration = frame_times.last().unwrap().duration_since(frame_times[0]).as_secs_f64();
-            let actual_fps = if recent_duration > 0.0 { (frame_times.len() - 1) as f64 / recent_duration } else { fps };
-
-            // Adjust timing if actual FPS differs significantly from expected
-            if (actual_fps - fps).abs() > 1.0 && frame_times.len() > 10 {
-                let fps_ratio = fps / actual_fps;
-                time_correction_s += (fps_ratio - 1.0) * 0.1; // Gradual FPS correction
-                if debug_enabled {
-                    eprintln!("📊 FPS adjustment: expected {:.2}, actual {:.2}, ratio {:.3}", fps, actual_fps, fps_ratio);
-                }
-            }
-        }
+        let processing_start_time = Instant::now();
 
         let raw = &frames[frame_index];
 
@@ -513,7 +493,17 @@ fn main() -> std::io::Result<()> {
                     }
                 }
                 Err(e) => {
-                    eprintln!("❌ Failed to send frame {} : {}", frame_index, e);
+                    match e.kind() {
+                        std::io::ErrorKind::WouldBlock => {
+                            // Non-blocking socket - this is expected occasionally
+                            if debug_enabled {
+                                eprintln!("⚠️ Socket would block for frame {} (non-blocking)", frame_index);
+                            }
+                        }
+                        _ => {
+                            eprintln!("❌ Failed to send frame {} : {}", frame_index, e);
+                        }
+                    }
                 }
             }
         } else {
@@ -525,100 +515,38 @@ fn main() -> std::io::Result<()> {
                     }
                 }
                 Err(e) => {
-                    eprintln!("❌ Failed to send frame {} : {}", frame_index, e);
+                    match e.kind() {
+                        std::io::ErrorKind::WouldBlock => {
+                            // Non-blocking socket - this is expected occasionally
+                            if debug_enabled {
+                                eprintln!("⚠️ Socket would block for frame {} (non-blocking)", frame_index);
+                            }
+                        }
+                        _ => {
+                            eprintln!("❌ Failed to send frame {} : {}", frame_index, e);
+                        }
+                    }
                 }
             }
         }
 
-        // Measure and store processing latency
+        // Measure and EMA processing latency
         let processing_duration = processing_start_time.elapsed().as_secs_f64();
-        processing_latencies.push(processing_duration);
-        if processing_latencies.len() > 20 { processing_latencies.remove(0); } // Keep last 20 measurements
-
-        // Calculate dynamic processing latency (median of recent measurements)
-        let mut sorted_latencies = processing_latencies.clone();
-        sorted_latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let median_latency = if sorted_latencies.len() > 0 {
-            let mid = sorted_latencies.len() / 2;
-            if sorted_latencies.len() % 2 == 0 {
-                (sorted_latencies[mid - 1] + sorted_latencies[mid]) / 2.0
-            } else {
-                sorted_latencies[mid]
-            }
+        if first_processing_measurement {
+            processing_latency_ema = processing_duration;
+            first_processing_measurement = false;
         } else {
-            0.005 // Fallback to 5ms if no measurements yet
-        };
-
-        // Periodic latency reporting (every 100 frames)
-        if frame_index % 100 == 0 && processing_latencies.len() > 5 {
-            let min_latency = processing_latencies.iter().fold(f64::INFINITY, |a, &b| a.min(b));
-            let max_latency = processing_latencies.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
-            let avg_latency = processing_latencies.iter().sum::<f64>() / processing_latencies.len() as f64;
-
-            if debug_enabled {
-                eprintln!("📊 Processing latency: median {:.1}ms, avg {:.1}ms, min {:.1}ms, max {:.1}ms (samples: {})",
-                         median_latency * 1000.0, avg_latency * 1000.0, min_latency * 1000.0, max_latency * 1000.0, processing_latencies.len());
-            }
+            processing_latency_ema = processing_latency_ema * (1.0 - processing_ema_alpha) + processing_duration * processing_ema_alpha;
         }
 
-        // Enhanced drift correction with better timing precision
-        if let Some((beat_pos, beat_epoch_opt, beat_instant)) = beat_shared.lock().ok().and_then(|g| (*g).clone()) {
-            // Use high-precision timing for better sync
-            let now = Instant::now();
-            let elapsed_since_beat = beat_instant.elapsed().as_secs_f64();
+        if debug_enabled && frame_index % 100 == 0 {
+            eprintln!("📊 Processing latency EMA: {:.1}ms", processing_latency_ema * 1000.0);
+        }
 
-            // Compute our current playback position with frame-accurate timestamps
-            let rel_us_now = if frame_index < timestamps_us.len() && start_frame < timestamps_us.len() {
-                timestamps_us[frame_index].saturating_sub(timestamps_us[start_frame])
-            } else {
-                ((frame_index - start_frame) as f64 * (1.0 / fps) * 1_000_000.0) as u64
-            };
-            let our_pos = (rel_us_now as f64) / 1_000_000.0;
-
-            // Predict where video should be now with higher precision
-            let predicted_video_pos = beat_pos + elapsed_since_beat;
-            let slip = our_pos - predicted_video_pos;
-
-            // Use dynamic processing latency compensation
-            let compensated_slip = slip - median_latency;
-
-            // Only apply drift correction if slip is significant and not too large
-            if compensated_slip.abs() > drift_threshold && compensated_slip.abs() < max_drift_correction {
-                // Apply gradual correction with adaptive factor based on slip magnitude
-                let correction_factor = if compensated_slip.abs() > 0.1 { 0.5 } else { 0.2 }; // More aggressive for larger drifts
-                let correction = compensated_slip * correction_factor;
-
-                // Adjust timing gradually
-                time_correction_s += correction;
-
-                // Clamp correction to prevent oscillation
-                time_correction_s = clamp_f(time_correction_s as f32, -2.0, 2.0) as f64;
-
-                eprintln!("🛠️  Drift {:.3}s detected (raw: {:.3}s, compensated: {:.3}s), applying gradual correction {:.3}s (total correction: {:.3}s, latency: {:.1}ms)",
-                         compensated_slip, slip, compensated_slip, correction, time_correction_s, median_latency * 1000.0);
-
-                // Clear beat after applying correction to prevent immediate re-correction
-                if let Ok(mut g) = beat_shared.lock() { *g = None; }
-            } else if compensated_slip.abs() > max_drift_correction {
-                // For very large drifts, do a full resync but more carefully
-                let new_target = (our_pos - slip).max(0.0);
-                let target_us = (new_target * 1_000_000.0) as u64;
-                let mut target_frame = 0usize;
-                while target_frame < timestamps_us.len() && timestamps_us[target_frame] < target_us { target_frame += 1; }
-
-                // Only resync if the jump is reasonable
-                if target_frame < frames.len() && (target_frame as i64 - frame_index as i64).abs() < 300 {
-                    frame_index = target_frame;
-                    start_frame = frame_index;
-                    start_instant = Instant::now();
-                    elapsed_base = Duration::from_millis(0);
-                    time_correction_s = 0.0;
-                    eprintln!("🛠️  Large drift {:.3}s detected, resyncing to {:.3}s (frame {})", slip, new_target, frame_index);
-                }
-
-                // Clear beat after resync
-                if let Ok(mut g) = beat_shared.lock() { *g = None; }
-            }
+        // Simplified sync - no complex heartbeat corrections
+        // Just clear any received heartbeat to prevent accumulation
+        if beat_shared.lock().ok().map_or(false, |g| g.is_some()) {
+            if let Ok(mut g) = beat_shared.lock() { *g = None; }
         }
 
         frame_index += 1;

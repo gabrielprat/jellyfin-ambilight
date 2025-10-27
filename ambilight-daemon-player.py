@@ -33,7 +33,7 @@ JELLYFIN_BASE_URL = os.getenv("JELLYFIN_BASE_URL")
 WLED_HOST = os.getenv('WLED_HOST', 'wled-ambilight-lgc1.lan')
 WLED_UDP_RAW_PORT = int(os.getenv('WLED_UDP_RAW_PORT', '19446'))
 AMBILIGHT_DATA_DIR = os.getenv("AMBILIGHT_DATA_DIR", "/app/data/ambilight")
-PLAYBACK_MONITOR_INTERVAL = float(os.getenv('PLAYBACK_MONITOR_INTERVAL', '0.2'))
+PLAYBACK_MONITOR_INTERVAL = float(os.getenv('PLAYBACK_MONITOR_INTERVAL', '0.1'))  # Increased frequency for better sync
 DNS_TTL_SECONDS = int(os.getenv('DNS_TTL_SECONDS', '3600'))
 # Device → WLED mapping
 DEVICE_MATCH_FIELD = os.getenv("DEVICE_MATCH_FIELD", "DeviceName").strip()
@@ -60,6 +60,7 @@ class PlayerDaemon:
         self._threads: Dict[str, threading.Thread] = {}
         self._session_state: Dict[str, Dict] = {}
         self._last_resync: Dict[str, float] = {}  # Track last resync time per session
+        self._frame_counters: Dict[str, int] = {}  # Track frame counts for periodic heartbeats
         # Track items we already warned about missing binary
         self._no_binary_notified: set[str] = set()
         # Normalization helper for identifiers and device names
@@ -254,13 +255,9 @@ class PlayerDaemon:
                 pass
 
     def _resync_player(self, session_id: str, position_seconds: float):
-        p = self._players.get(session_id)
-        if p:
-            try:
-                logger.info(f"🔄 Resyncing player for session {session_id} → {fmt_ts(position_seconds)}")
-                p.resync(position_seconds)
-            except Exception as e:
-                logger.warning(f"Player resync failed: {e}")
+        # Disabled resync functionality - using simple sync approach
+        logger.debug(f"🔄 Resync requested for session {session_id} → {fmt_ts(position_seconds)} (disabled)")
+        return
 
     def monitor(self):
         logger.info("🎬 Starting player monitoring...")
@@ -332,23 +329,36 @@ class PlayerDaemon:
                                     self._resume_player(sid)
                                 # Only resync on large position jumps (seeks), not normal playback progression
                                 position_jump = abs(pos_s - prev_pos)
-                                if position_jump > 2.0:  # Only resync on large seeks (>2s jump)
+                                if position_jump > 1.0:  # More sensitive seek detection (>1s jump, was 2s)
                                     # Debounce resyncs to prevent rapid successive resyncs
                                     current_time = time.time()
                                     last_resync = self._last_resync.get(sid, 0)
-                                    if current_time - last_resync > 2.0:  # Minimum 2s between resyncs
+                                    if current_time - last_resync > 1.0:  # Minimum 1s between resyncs (was 2s)
                                         logger.info(f"⏩ Seek detected: {fmt_ts(prev_pos)} → {fmt_ts(pos_s)} (jump={position_jump:.1f}s)")
                                         self._resync_player(sid, pos_s)
                                         self._last_resync[sid] = current_time
                                     else:
                                         logger.debug(f"⏩ Seek detected but debounced: {fmt_ts(prev_pos)} → {fmt_ts(pos_s)} (jump={position_jump:.1f}s)")
                                 # Send heartbeat to Rust for fine-grained drift correction
-                                # Only send beat if position has changed significantly to reduce noise
-                                if abs(pos_s - prev_pos) > 0.1:  # Only send beat if position changed by >0.1s
+                                # Send beat more frequently for better sync (every 0.5s)
+                                current_time = time.time()
+                                last_beat_time = self._session_state.get(sid, {}).get('last_beat_time', 0)
+
+                                # Send beat every 0.5 seconds or on position changes
+                                should_send_beat = (
+                                    current_time - last_beat_time >= 0.5 or  # Every 0.5s
+                                    abs(pos_s - prev_pos) > 0.05  # Or on position change >0.05s
+                                )
+
+                                if should_send_beat:
                                     try:
                                         player = self._players.get(sid)
                                         if player:
+                                            # Always include time.time() as epoch for precise timing
                                             player.beat(pos_s, time.time())
+                                            # Update last beat time
+                                            if sid in self._session_state:
+                                                self._session_state[sid]['last_beat_time'] = current_time
                                     except Exception:
                                         pass
                         else:
