@@ -1,0 +1,4 @@
+# Minimal requirements for Ambilight Player
+# Only includes packages actually used by the player daemon
+
+requests==2.31.0

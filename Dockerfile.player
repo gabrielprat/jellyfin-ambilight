@@ -16,7 +16,7 @@ WORKDIR /app
 # Python sources will be bind-mounted via docker-compose for live reload
 COPY --from=builder /usr/src/ambilight-player/target/release/ambilight-player /usr/local/bin/ambilight-player
 
-COPY requirements.txt /app/requirements.txt
+COPY requirements-player.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 ENV AMBILIGHT_DATA_DIR=/app/data/ambilight
