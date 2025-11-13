@@ -219,8 +219,6 @@ fn main() -> std::io::Result<()> {
 
     let seek_target: Arc<Mutex<Option<f64>>> = Arc::new(Mutex::new(None));
     let paused_flag: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
-    // Heartbeat shared storage: (video_pos_seconds, optional_epoch_seconds, received_instant)
-    let beat_shared: Arc<Mutex<Option<(f64, Option<f64>, Instant)>>> = Arc::new(Mutex::new(None));
     let running_cmd: Arc<AtomicBool> = running.clone();
     let request_blank_on_exit = Arc::new(AtomicBool::new(false));
     let request_blank_on_exit_cmd = request_blank_on_exit.clone();
@@ -228,7 +226,6 @@ fn main() -> std::io::Result<()> {
     {
         let seek_clone = Arc::clone(&seek_target);
         let paused_clone = Arc::clone(&paused_flag);
-        let beat_sink = Arc::clone(&beat_shared);
         std::thread::spawn(move || {
             let stdin = io::stdin();
             let mut reader = io::BufReader::new(stdin.lock());
@@ -248,12 +245,6 @@ fn main() -> std::io::Result<()> {
                     if let Ok(mut p) = paused_clone.lock() { *p = true; }
                 } else if parts.len() == 1 && parts[0].eq_ignore_ascii_case("RESUME") {
                     if let Ok(mut p) = paused_clone.lock() { *p = false; }
-                } else if (parts.len() == 3 || parts.len() == 2) && parts[0].eq_ignore_ascii_case("BEAT") {
-                    // BEAT <video_pos_seconds> [epoch_seconds]
-                    if let Ok(pos) = parts[1].parse::<f64>() {
-                        let epoch = if parts.len() >= 3 { parts[2].parse::<f64>().ok() } else { None };
-                        if let Ok(mut hb) = beat_sink.lock() { *hb = Some((pos, epoch, Instant::now())); }
-                    }
                 } else if parts.len() == 1 && parts[0].eq_ignore_ascii_case("STOP") {
                     eprintln!("🟥 STOP received — will blank and exit.");
                     request_blank_on_exit_cmd.store(true, Ordering::SeqCst);
@@ -543,11 +534,7 @@ fn main() -> std::io::Result<()> {
             eprintln!("📊 Processing latency EMA: {:.1}ms", processing_latency_ema * 1000.0);
         }
 
-        // Simplified sync - no complex heartbeat corrections
-        // Just clear any received heartbeat to prevent accumulation
-        if beat_shared.lock().ok().map_or(false, |g| g.is_some()) {
-            if let Ok(mut g) = beat_shared.lock() { *g = None; }
-        }
+        // No heartbeat-based runtime sync
 
         frame_index += 1;
     }

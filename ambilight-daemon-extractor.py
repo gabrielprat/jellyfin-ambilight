@@ -130,7 +130,9 @@ class ExtractorDaemon:
         ttl = int(os.getenv('DNS_TTL_SECONDS', '3600'))
         now = time.time()
         if ttl == 0:
-            force = True
+            # When TTL is 0, always use the hostname and never pin to an IP
+            self._jellyfin_resolved_ip = None
+            return
         if not force and self._jellyfin_resolved_ip and (now - self._jellyfin_last_resolve_ts) < ttl:
             return
         try:
