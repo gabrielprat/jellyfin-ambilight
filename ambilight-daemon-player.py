@@ -303,9 +303,21 @@ class PlayerDaemon:
                             if item_id in self._no_binary_notified:
                                 self._no_binary_notified.discard(item_id)
 
-                        # Detect large seek jumps
-                        if abs(pos_s - prev_pos) > 2.0:
-                            logger.info(f"⏩  Session {sid} seek detected: {fmt_ts(prev_pos)} → {fmt_ts(pos_s)} (Δ{pos_s - prev_pos:+.1f}s)")
+                        # Detect large seek jumps and re-sync ambilight
+                        seek_threshold = 2.0
+                        if abs(pos_s - prev_pos) > seek_threshold:
+                            logger.info(
+                                f"⏩  Session {sid} seek detected: {fmt_ts(prev_pos)} → {fmt_ts(pos_s)} "
+                                f"(Δ{pos_s - prev_pos:+.1f}s); re-syncing ambilight"
+                            )
+                            # If a player is already running for this session, send a SEEK command
+                            # rather than restarting the whole process to minimise visual glitches.
+                            existing_player = self._players.get(sid)
+                            if existing_player is not None:
+                                try:
+                                    existing_player.seek(pos_s)
+                                except Exception as e:
+                                    logger.warning(f"Failed to send seek to player for session {sid}: {e}")
 
                         # If the currently loaded item changed, stop the existing player (we'll start a new one below)
                         if sid in self._players and prev_state.get('item_id') and prev_state.get('item_id') != item_id:

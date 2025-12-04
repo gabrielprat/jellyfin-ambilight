@@ -14,7 +14,11 @@ services:
       - ${TV_PATH:-./test-media/tv}:/media/tv:ro
 
     networks:
-      - homelab-network
+      homelab-network:
+        ipv4_address: 10.1.0.20
+    dns:
+      - 192.168.1.191
+      - 1.1.1.1
 
   ambilight-player:
     build:
@@ -29,9 +33,13 @@ services:
       - ${DATA_PATH:-./data}:/app/data
       - ${MOVIES_PATH:-./test-media/movies}:/media/movies:ro
       - ${TV_PATH:-./test-media/tv}:/media/tv:ro
-    networks:
-      - homelab-network
 
+    networks:
+      homelab-network:
+        ipv4_address: 10.1.0.21
+    dns:
+      - 192.168.1.191
+      - 1.1.1.1
 volumes:
   ambilight-data:
 

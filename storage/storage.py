@@ -41,7 +41,10 @@ class OptimizedFileBasedStorage:
 
         print(f"📁 Optimized storage initialized: {self.data_dir}")
 
-    def save_item(self, item_id: str, library_id: str, name: str, item_type: str, filepath: str, jellyfin_date_created: str = None, kind: Optional[str] = None, season: Optional[int] = None, episode: Optional[int] = None):
+    def save_item(self, item_id: str, library_id: str, name: str, item_type: str, filepath: str,
+                  jellyfin_date_created: str = None, kind: Optional[str] = None,
+                  season: Optional[int] = None, episode: Optional[int] = None,
+                  viewed: Optional[bool] = None):
         """Save Jellyfin item metadata to JSON file"""
         # check if filepath exists
         if not os.path.exists(filepath):
@@ -81,7 +84,8 @@ class OptimizedFileBasedStorage:
             'updated_at': datetime.now().isoformat(),
             'extraction_status': extraction_status,
             'extraction_error': extraction_error,
-            'extraction_attempts': extraction_attempts
+            'extraction_attempts': extraction_attempts,
+            'viewed': viewed if viewed is not None else existing.get('viewed', False),
         }
 
         action = "updated" if item_file.exists() else "added"
@@ -151,8 +155,9 @@ class OptimizedFileBasedStorage:
         print("Getting videos needing extraction...")
         videos_needing_extraction = []
 
-        # Get age filtering configuration
+        # Get filtering configuration
         extraction_max_age_days = float(os.getenv("EXTRACTION_MAX_AGE_DAYS", "0"))
+        extract_viewed = os.getenv("EXTRACT_VIEWED", "false").lower() == "true"
         current_time = time.time()
 
         # Scan all items
@@ -175,6 +180,10 @@ class OptimizedFileBasedStorage:
 
                 # Skip if extraction has already failed
                 if item_data.get('extraction_status') == 'failed':
+                    continue
+
+                # Skip viewed items when EXTRACT_VIEWED is false
+                if not extract_viewed and item_data.get('viewed', False):
                     continue
 
                 # Age filtering: Skip videos older than EXTRACTION_MAX_AGE_DAYS

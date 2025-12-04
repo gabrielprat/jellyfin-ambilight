@@ -91,3 +91,26 @@ class AmbilightBinaryPlayer:
         with self._position_lock:
             self._current_position = position_seconds
         return
+
+    def seek(self, position_seconds: float):
+        """
+        Request a seek in the underlying Rust player without restarting the process.
+
+        The Rust binary understands a line on stdin in the form:
+
+            SEEK <seconds>\n
+
+        We keep this best-effort and fall back silently if anything goes wrong so
+        that ambilight never breaks normal playback.
+        """
+        logger.info("⏩ Seek requested — sending to Rust player at %.3fs", position_seconds)
+        with self._lock:
+            if self._proc and self._proc.poll() is None and self._proc.stdin:
+                try:
+                    cmd = f"SEEK {position_seconds:.3f}\n".encode("ascii")
+                    self._proc.stdin.write(cmd)
+                    self._proc.stdin.flush()
+                    with self._position_lock:
+                        self._current_position = position_seconds
+                except Exception as e:
+                    logger.warning("⚠️ Failed to send SEEK to Rust player: %s", e)

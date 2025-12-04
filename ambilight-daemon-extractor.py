@@ -36,6 +36,7 @@ EXTRACTION_BATCH_SIZE = int(os.getenv('EXTRACTION_BATCH_SIZE', '5'))
 AMBILIGHT_DATA_DIR = os.getenv("AMBILIGHT_DATA_DIR", "/app/data/ambilight")
 EXTRACTION_START_TIME = os.getenv("EXTRACTION_START_TIME", "")  # e.g. 22:00
 EXTRACTION_END_TIME = os.getenv("EXTRACTION_END_TIME", "")      # e.g. 06:00
+EXTRACT_VIEWED = os.getenv("EXTRACT_VIEWED", "false").lower() == "true"
 
 shutdown_event = threading.Event()
 logger = logging.getLogger(__name__)
@@ -202,13 +203,18 @@ class ExtractorDaemon:
                     "Recursive": "true",
                     "IncludeItemTypes": "Movie,Episode,Video",
                     # Ask Jellyfin for series-related fields so we can persist them
-                    "Fields": "Path,MediaSources,DateCreated,SeriesName,SeasonName,ParentIndexNumber,IndexNumber,SeasonIndexNumber"
+                    # Also include UserData so we know if the item has been viewed
+                    "Fields": "Path,MediaSources,DateCreated,SeriesName,SeasonName,ParentIndexNumber,IndexNumber,SeasonIndexNumber,UserData"
                 },
                 timeout=15
             )
             items_r.raise_for_status()
             items = items_r.json().get("Items", [])
             for item in items:
+                # Capture viewed status from Jellyfin (per user) so we can filter later in storage
+                user_data = item.get("UserData", {}) or {}
+                is_played = bool(user_data.get("Played", False))
+
                 item_id = item["Id"]
                 title = item.get("Name", "Unknown")
                 item_type = item.get("Type", "Unknown")
@@ -232,7 +238,19 @@ class ExtractorDaemon:
                                 episode_num = int(m.group(2))
                     except Exception:
                         pass
-                self.storage.save_item(item_id, lib_id, title, item_type, filepath, created, kind=kind, season=season_num, episode=episode_num)
+                # Persist viewed flag so we can respect EXTRACT_VIEWED when selecting work
+                self.storage.save_item(
+                    item_id,
+                    lib_id,
+                    title,
+                    item_type,
+                    filepath,
+                    created,
+                    kind=kind,
+                    season=season_num,
+                    episode=episode_num,
+                    viewed=is_played,
+                )
 
     def scan_library_for_new_videos(self):
         logger.info("🔄 Starting library scan (extractor)...")
@@ -353,6 +371,8 @@ class ExtractorDaemon:
             logger.info(f"🕒 Extraction Time Window: {s//60:02d}:{s%60:02d} → {e//60:02d}:{e%60:02d}")
         else:
             logger.info("🕒 Extraction Time Window: not configured (no time restrictions)")
+        # Log EXTRACT_VIEWED configuration
+        logger.info(f"📺 Extract Viewed Items: {EXTRACT_VIEWED} (set EXTRACT_VIEWED=true to extract already viewed media)")
         t = threading.Thread(target=self.scan_library_for_new_videos, daemon=True)
         t.start()
         logger.info("✅ Extractor daemon started")

@@ -262,7 +262,11 @@ fn main() -> std::io::Result<()> {
         // seek handling
         if let Ok(mut tgt) = seek_target.lock() {
             if let Some(sec) = *tgt {
-                let target_us = ((sec + adaptive_sync_lead) * 1_000_000.0) as u64;
+                // For seeks we interpret `sec` as the *actual* desired video position in seconds.
+                // We intentionally do NOT add `adaptive_sync_lead` here because Jellyfin's reported
+                // position is already slightly ahead of what you see on screen; adding the extra
+                // lead again would push ambilight too far ahead after a seek.
+                let target_us = (sec * 1_000_000.0) as u64;
                 let mut target_frame = 0usize;
                 while target_frame < timestamps_us.len() && timestamps_us[target_frame] < target_us { target_frame += 1; }
                 frame_index = target_frame.min(frames.len());

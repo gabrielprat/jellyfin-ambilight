@@ -1,0 +1,1 @@
+rsync -avzrp --exclude ".env" --exclude 'data' --exclude ".git" --exclude "__pycache__" --exclude ".gitignore" --exclude "sync_with_homelab.sh" --exclude "ambilight-player/target" . gabi@galagaon:/home/gabi/docker/jellyfin-ambilight
