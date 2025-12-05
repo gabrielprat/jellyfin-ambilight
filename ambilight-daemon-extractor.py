@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Ambilight Extractor Daemon (CV2)
-================================
+Ambilight Extractor Daemon
+=========================
 
-Runs the library scan and frame extraction using simplified/extractor_cv2.py
+Runs the library scan and frame extraction using the Rust ambilight-extractor binary
 and stores AMBI binaries under $AMBILIGHT_DATA_DIR/binaries.
 """
 
@@ -18,12 +18,11 @@ from urllib.parse import urlparse
 from pathlib import Path
 
 from storage.storage import FileBasedStorage
+import subprocess
 
 # Local paths
 sys.path.append('/app')
 sys.path.append('/app/storage')
-
-from simplified.extractor_cv2 import extract_frames  # noqa: E402
 
 
 # Config
@@ -184,6 +183,51 @@ class ExtractorDaemon:
             logger.warning(f"get_jellyfin_user_id failed: {e}")
             return None
 
+    def _extract_with_rust(self, video_file: str, jellyfin_item_id: str) -> bool:
+        """Extract ambilight data using Rust extractor binary."""
+        try:
+            # Get configuration from environment
+            top = 150  # Fixed as per original Python extractor
+            bottom = 150
+            rgbw = os.getenv("AMBILIGHT_RGBW", "false").lower() in ("1", "true", "yes")
+            data_dir = Path(AMBILIGHT_DATA_DIR)
+            binary_dir = data_dir / "binaries"
+            binary_dir.mkdir(parents=True, exist_ok=True)
+            out_path = binary_dir / f"{jellyfin_item_id}.bin"
+
+            # Build command for Rust extractor
+            cmd = [
+                "/usr/local/bin/ambilight-extractor",
+                "--input", video_file,
+                "--output", str(out_path),
+                "--top", str(top),
+                "--bottom", str(bottom),
+            ]
+            if rgbw:
+                cmd.append("--rgbw")
+
+            logger.debug(f"Running Rust extractor: {' '.join(cmd)}")
+
+            # Run extractor without capturing output so Rust's stderr/stdout
+            # go directly to the container logs (docker logs ambilight-extractor).
+            result = subprocess.run(
+                cmd,
+                timeout=None,  # No timeout - extraction can take a long time
+            )
+
+            if result.returncode == 0:
+                return True
+            else:
+                logger.error(f"Rust extractor failed with code {result.returncode}")
+                return False
+
+        except subprocess.TimeoutExpired:
+            logger.error("Rust extractor timed out")
+            return False
+        except Exception as e:
+            logger.exception(f"Failed to run Rust extractor: {e}")
+            return False
+
     def perform_incremental_library_update(self, user_id):
         base, host_header = self._jellyfin_base_resolved()
         hdrs = {"X-Emby-Token": JELLYFIN_API_KEY}
@@ -337,7 +381,8 @@ class ExtractorDaemon:
                                 logger.info(f"⏭️  Skipping (up-to-date): {item['name']}")
                                 self.storage.mark_extraction_completed(item['id'])
                             else:
-                                ok = extract_frames(item['filepath'], item['id'])
+                                # Call Rust extractor binary
+                                ok = self._extract_with_rust(item['filepath'], item['id'])
                                 if ok:
                                     if kind == 'serie':
                                         if se:

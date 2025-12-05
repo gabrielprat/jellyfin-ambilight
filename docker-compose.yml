@@ -1,4 +1,5 @@
 services:
+  # Ambilight extractor: Python daemon + Rust extractor binary
   ambilight-extractor:
     build:
       context: .

@@ -1,18 +1,52 @@
-# Dockerfile.extractor
-FROM python:3.11-slim
+# Stage 1: Build Rust extractor binary
+FROM rust:1.84 as builder
 
-# Install system deps for OpenCV + ffmpeg
-RUN apt-get update && apt-get install -y \
-    python3-opencv \
-    ffmpeg \
-    libsm6 libxext6 libxrender-dev \
- && rm -rf /var/lib/apt/lists/*
+WORKDIR /usr/src/ambilight-extractor
+
+# Install build dependencies for opencv-rs (builder and runtime will share the same base distro)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        clang \
+        libclang-dev \
+        pkg-config \
+        cmake \
+        ninja-build \
+        build-essential \
+        git \
+        wget \
+        unzip \
+        libopencv-dev \
+        libopencv-contrib-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Cargo.toml and source
+COPY ambilight-extractor/Cargo.toml ./
+COPY ambilight-extractor/src ./src
+
+# Build the extractor (Cargo.lock will be generated in container)
+RUN cargo build --release
+
+# Stage 2: Runtime (same base image as builder to avoid ABI/version mismatches)
+FROM rust:1.84
+
+# Install Python and runtime dependencies (OpenCV + video stack)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-requests \
+    libopencv-dev \
+    libopencv-contrib-dev \
+    libgstreamer1.0-0 \
+    libgstreamer-plugins-base1.0-0 \
+    libdc1394-25 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Install Python dependencies (mounted code at runtime via volume)
-COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+# Copy Rust binary from builder
+COPY --from=builder /usr/src/ambilight-extractor/target/release/ambilight-extractor /usr/local/bin/ambilight-extractor
+
+# Python dependencies: only 'requests' is needed by the extractor daemon; installed via apt above
 
 # Create data directory
 ENV AMBILIGHT_DATA_DIR=/app/data/ambilight
