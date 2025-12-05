@@ -5,6 +5,11 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-opencv = { version = "0.88", default-features = false, features = ["imgproc", "imgcodecs", "videoio"] }
+ffmpeg-next = "5.0"
+imageproc = "0.23"
+image = "0.24"
 byteorder = "1.5"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+[build-dependencies]
+pkg-config = "0.3"
