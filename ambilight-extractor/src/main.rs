@@ -263,7 +263,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let zones = compute_led_zones(frame_size, counts);
     let fmt_word = if cli.rgbw { 1u8 } else { 0u8 };
 
-    // Prepare output buffer
+    // Prepare in-memory output buffer - all processing happens in memory,
+    // and we only write to disk once at the end for efficiency
     let mut data = Vec::new();
 
     // Write header: "AMb2" + f32 fps + u16 top + u16 bottom + u16 left + u16 right + u8 fmt
@@ -314,18 +315,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Write atomically using temp file
+    // Write atomically using temp file - this is the ONLY disk write operation
+    // All frame processing was done in memory (the `data` Vec)
     let temp_path = output_path.with_extension("bin.tmp");
 
-    // Ensure parent directory exists
+    // Ensure parent directory exists (only directory creation, no data write)
     if let Some(parent) = output_path.parent() {
         fs::create_dir_all(parent)?;
     }
 
-    // Write to temp file
+    // Single atomic write of all processed data to disk
     fs::write(&temp_path, &data)?;
 
-    // Atomic rename
+    // Atomic rename to final location
     fs::rename(&temp_path, output_path)?;
 
     let end_time = Local::now();
