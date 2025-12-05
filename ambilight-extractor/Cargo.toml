@@ -1,0 +1,10 @@
+[package]
+name = "ambilight-extractor"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+opencv = { version = "0.88", default-features = false, features = ["imgproc", "imgcodecs", "videoio"] }
+byteorder = "1.5"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }

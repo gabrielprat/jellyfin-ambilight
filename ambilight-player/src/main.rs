@@ -478,22 +478,14 @@ fn main() -> std::io::Result<()> {
         // Apply input position rotation to final target frame
         if rot_leds > 0 {
             let rotated_frame = rotate_led_frame(&out_frame, rot_leds, total_tgt, bytes_per_led);
-            if debug_enabled {
-                eprintln!("🔄 Applied rotation: {} LEDs clockwise (LED 0 now shows color from position {})", rot_leds, rot_leds);
-            }
             match socket.send(&rotated_frame) {
-                Ok(n) => {
-                    if debug_enabled {
-                        eprintln!("➡️ Sent frame {} -> {} bytes (tgt_leds={}, rotated by {})", frame_index, n, total_tgt, rot_leds);
-                    }
+                Ok(_) => {
+                    // Success - no logging to avoid I/O overhead
                 }
                 Err(e) => {
                     match e.kind() {
                         std::io::ErrorKind::WouldBlock => {
-                            // Non-blocking socket - this is expected occasionally
-                            if debug_enabled {
-                                eprintln!("⚠️ Socket would block for frame {} (non-blocking)", frame_index);
-                            }
+                            // Non-blocking socket - this is expected occasionally, no logging needed
                         }
                         _ => {
                             eprintln!("❌ Failed to send frame {} : {}", frame_index, e);
@@ -504,18 +496,13 @@ fn main() -> std::io::Result<()> {
         } else {
             // send and check result
             match socket.send(&out_frame) {
-                Ok(n) => {
-                    if debug_enabled {
-                        eprintln!("➡️ Sent frame {} -> {} bytes (tgt_leds={})", frame_index, n, total_tgt);
-                    }
+                Ok(_) => {
+                    // Success - no logging to avoid I/O overhead
                 }
                 Err(e) => {
                     match e.kind() {
                         std::io::ErrorKind::WouldBlock => {
-                            // Non-blocking socket - this is expected occasionally
-                            if debug_enabled {
-                                eprintln!("⚠️ Socket would block for frame {} (non-blocking)", frame_index);
-                            }
+                            // Non-blocking socket - this is expected occasionally, no logging needed
                         }
                         _ => {
                             eprintln!("❌ Failed to send frame {} : {}", frame_index, e);
