@@ -2,6 +2,7 @@
 import os
 import sys
 import json
+import argparse
 from pathlib import Path
 from typing import Optional
 
@@ -44,6 +45,11 @@ def format_row(columns, widths):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="List extracted ambilight binaries with metadata.")
+    parser.add_argument("--show-path", action="store_true", help="Include full binary file path in output")
+    args = parser.parse_args()
+    show_path = args.show_path
+
     project_root = Path(__file__).resolve().parent
     print(project_root)
     dotenv_path = project_root / ".env"
@@ -105,16 +111,33 @@ def main():
             size_bytes = bin_file.stat().st_size
             total_size += size_bytes
             size_mb = human_mb(size_bytes)
+            bin_path_str = str(bin_file.resolve())
             # Include hidden sort metadata at end: series_name, season_num, episode_num
-            rows.append([kind, season if season is not None else "", episode if episode is not None else "", title, filename, size_mb, series_name, season if season is not None else -1, episode if episode is not None else -1])
+            rows.append([
+                kind,
+                season if season is not None else "",
+                episode if episode is not None else "",
+                title,
+                filename,
+                size_mb,
+                series_name,
+                season if season is not None else -1,
+                episode if episode is not None else -1,
+                bin_path_str,
+            ])
         except Exception as e:
             print(f"WARN: failed to read {item_json}: {e}", file=sys.stderr)
 
     # Determine column widths
     headers = ["Kind", "Season", "Episode", "Title", "Filename", "Size (MB)"]
+    if show_path:
+        headers.append("Path")
     widths = [len(h) for h in headers]
     for row in rows:
-        for i, cell in enumerate(row[:6]):
+        row_print = row[:6].copy()
+        if show_path:
+            row_print.append(row[-1])  # binary path
+        for i, cell in enumerate(row_print):
             widths[i] = max(widths[i], len(str(cell)))
 
     # Sort rows: group series by series_name, then season, episode; others by kind then title
@@ -138,7 +161,10 @@ def main():
         print(format_row(headers, widths))
         print(format_row(["-" * w for w in widths], widths))
         for row in rows:
-            print(format_row(row[:6], widths))
+            row_out = row[:6].copy()
+            if show_path:
+                row_out.append(row[-1])  # binary path
+            print(format_row(row_out, widths))
         print()
         print(f"Total size: {human_mb(total_size)} MB across {len(rows)} file(s)")
     else:

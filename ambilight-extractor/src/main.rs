@@ -96,6 +96,19 @@ fn compute_led_zones(width: u32, height: u32, counts: (u16, u16, u16, u16)) -> V
     zones
 }
 
+/// Convert RGB to RGBW by extracting the white component.
+/// The white component is the minimum of R, G, B (the amount of white light).
+/// The RGB components are then reduced by the white amount to get pure color.
+/// This preserves total brightness: R' + G' + B' + W ≈ R + G + B
+#[inline]
+fn rgb_to_rgbw(r: u8, g: u8, b: u8) -> (u8, u8, u8, u8) {
+    let w = r.min(g).min(b);
+    let r_out = r.saturating_sub(w);
+    let g_out = g.saturating_sub(w);
+    let b_out = b.saturating_sub(w);
+    (r_out, g_out, b_out, w)
+}
+
 fn extract_edge_dominant_color(frame: &RgbImage, x1: i32, y1: i32, x2: i32, y2: i32) -> (u8, u8, u8) {
     let width = (x2 - x1) as u32;
     let height = (y2 - y1) as u32;
@@ -243,6 +256,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = ffmpeg::codec::context::Context::from_parameters(video_stream.parameters())?;
     let mut decoder = context.decoder().video()?;
 
+    // Note: Hardware-accelerated decoding (v4l2m2m) may be used automatically by FFmpeg
+    // if available and if the codec supports it. Colorspace conversion (yuv420p->rgb24)
+    // is NOT hardware-accelerated on Raspberry Pi 4B - this is a known limitation.
+    // The warning "No accelerated colorspace conversion found" is expected and harmless.
+
     // Get video properties
     let fps = video_stream.avg_frame_rate();
     let fps_value = if fps.numerator() > 0 && fps.denominator() > 0 {
@@ -354,7 +372,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 for zone in &zones {
                     let (r, g, b) = extract_edge_dominant_color(&img, zone.0, zone.1, zone.2, zone.3);
                     if cli.rgbw {
-                        data.write_all(&[r, g, b, 0])?;
+                        // Convert RGB to RGBW by extracting white component
+                        let (r_out, g_out, b_out, w) = rgb_to_rgbw(r, g, b);
+                        data.write_all(&[r_out, g_out, b_out, w])?;
                     } else {
                         data.write_all(&[r, g, b])?;
                     }
@@ -407,7 +427,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for zone in &zones {
             let (r, g, b) = extract_edge_dominant_color(&img, zone.0, zone.1, zone.2, zone.3);
             if cli.rgbw {
-                data.write_all(&[r, g, b, 0])?;
+                // Convert RGB to RGBW by extracting white component
+                let (r_out, g_out, b_out, w) = rgb_to_rgbw(r, g, b);
+                data.write_all(&[r_out, g_out, b_out, w])?;
             } else {
                 data.write_all(&[r, g, b])?;
             }
