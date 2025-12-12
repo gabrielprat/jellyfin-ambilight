@@ -23,6 +23,7 @@ rsync -avzrp \
   --include="ambilight-extractor/Cargo.toml" \
   --include="ambilight-extractor/src/" \
   --include="ambilight-extractor/src/main.rs" \
+  --include="list_items_with_binaries.py" \
   --include="env.example" \
   --include="env.homelab" \
   --exclude="*" \
@@ -37,6 +38,5 @@ rsync -avzrp \
   --exclude=".DS_Store" \
   --exclude="*.log" \
   --exclude="README.md" \
-  --exclude="list_items_with_binaries.py" \
   --exclude="sync_with_homelab.sh" \
   . gabi@galagaon:/home/gabi/docker/jellyfin-ambilight
