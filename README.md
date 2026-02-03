@@ -398,3 +398,9 @@ docker-compose logs -f ambilight-player
 - For image build details and pre-built images (if provided), see `DOCKER_IMAGES.md` and `docker-compose.images.yml`.
 
 This README is the canonical reference for environment variables and runtime behavior; if you add new tuning knobs, please document them here as well.
+
+---
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
