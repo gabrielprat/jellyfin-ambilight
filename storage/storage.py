@@ -204,7 +204,6 @@ class OptimizedFileBasedStorage:
                             age_days = (current_time - created_timestamp) / (24 * 3600)
 
                             if age_days > extraction_max_age_days:
-                                print(f"⏰ Skipping {item_data.get('name', 'Unknown')} - too old ({age_days:.1f} days > {extraction_max_age_days} days)")
                                 continue
                         except (ValueError, TypeError) as e:
                             print(f"⚠️ Could not parse date for {item_data.get('name', 'Unknown')}: {jellyfin_date_created} - {e}")
@@ -271,6 +270,68 @@ class OptimizedFileBasedStorage:
             'pending_videos': pending_videos,
             'completion_percentage': completion_percentage
         }
+
+    def get_age_filtered_count(self) -> int:
+        """Count videos that would be pending but are filtered out by EXTRACTION_MAX_AGE_DAYS"""
+        extraction_max_age_days = float(os.getenv("EXTRACTION_MAX_AGE_DAYS", "0"))
+        if extraction_max_age_days <= 0:
+            return 0
+
+        extract_viewed = os.getenv("EXTRACT_VIEWED", "false").lower() == "true"
+        current_time = time.time()
+        age_filtered_count = 0
+
+        for item_file in self.items_dir.glob("*.json"):
+            try:
+                with open(item_file, 'r') as f:
+                    item_data = json.load(f)
+
+                # Filter video types
+                if item_data.get('type') not in ['Movie', 'Episode', 'Video']:
+                    continue
+
+                filepath = item_data.get('filepath')
+                if not filepath or filepath in ['Unknown', '']:
+                    continue
+
+                # Skip if video file doesn't exist
+                if not os.path.exists(filepath):
+                    continue
+
+                # Skip if extraction has already failed
+                if item_data.get('extraction_status') == 'failed':
+                    continue
+
+                # Skip viewed items when EXTRACT_VIEWED is false
+                if not extract_viewed and item_data.get('viewed', False):
+                    continue
+
+                # Check if binary exists - if it does, not pending
+                bin_file = self.binaries_dir / f"{item_data['id']}.bin"
+                if bin_file.exists():
+                    continue
+
+                # Check age filtering
+                jellyfin_date_created = item_data.get('jellyfin_date_created')
+                if jellyfin_date_created:
+                    try:
+                        if 'T' in jellyfin_date_created:
+                            created_dt = datetime.fromisoformat(jellyfin_date_created.replace('Z', '+00:00'))
+                        else:
+                            created_dt = datetime.fromisoformat(jellyfin_date_created)
+
+                        created_timestamp = created_dt.timestamp()
+                        age_days = (current_time - created_timestamp) / (24 * 3600)
+
+                        if age_days > extraction_max_age_days:
+                            age_filtered_count += 1
+                    except (ValueError, TypeError):
+                        pass
+
+            except (json.JSONDecodeError, IOError):
+                continue
+
+        return age_filtered_count
 
     def get_storage_info(self) -> Dict:
         """Get storage usage information"""

@@ -9,13 +9,17 @@ services:
     env_file:
       - .env
     volumes:
-      - ${PWD:-.}:/app
       - ${DATA_PATH:-./data}:/app/data
       - ${MOVIES_PATH:-./test-media/movies}:/media/movies:ro
       - ${TV_PATH:-./test-media/tv}:/media/tv:ro
     # Hardware acceleration for Raspberry Pi 4B (V4L2 M2M devices)
     # Note: Colorspace conversion (yuv420p->rgb24) is NOT hardware-accelerated on Pi 4B
     # This is a known limitation - only decoding can be hardware-accelerated
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "2"
     devices:
       - /dev/video10:/dev/video10  # H.264 decoder
       - /dev/video11:/dev/video11  # H.264 encoder
@@ -38,10 +42,14 @@ services:
     env_file:
       - .env
     volumes:
-      - ${PWD:-.}:/app
       - ${DATA_PATH:-./data}:/app/data
       - ${MOVIES_PATH:-./test-media/movies}:/media/movies:ro
       - ${TV_PATH:-./test-media/tv}:/media/tv:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "2"
 
     networks:
       homelab-network:

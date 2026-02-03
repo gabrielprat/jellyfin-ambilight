@@ -80,10 +80,17 @@ WORKDIR /app
 # Copy Rust binary from builder
 COPY --from=builder /usr/src/ambilight-extractor/target/release/ambilight-extractor /usr/local/bin/ambilight-extractor
 
+# Copy Python daemon and dependencies
+COPY ambilight-daemon-extractor.py /app/ambilight-daemon-extractor.py
+COPY storage/ /app/storage/
+
 # Python dependencies: only 'requests' is needed by the extractor daemon; installed via apt above
 
 # Create data directory
 ENV AMBILIGHT_DATA_DIR=/app/data/ambilight
 RUN mkdir -p $AMBILIGHT_DATA_DIR/binaries
+
+# Make Python scripts executable
+RUN chmod +x /app/ambilight-daemon-extractor.py
 
 CMD ["python3", "-u", "/app/ambilight-daemon-extractor.py"]

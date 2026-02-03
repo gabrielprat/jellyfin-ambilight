@@ -29,7 +29,9 @@ sys.path.append('/app/storage')
 JELLYFIN_API_KEY = os.getenv("JELLYFIN_API_KEY")
 JELLYFIN_BASE_URL = os.getenv("JELLYFIN_BASE_URL")
 
-LIBRARY_SCAN_INTERVAL = int(os.getenv('LIBRARY_SCAN_INTERVAL', '3600'))
+# How often we poll Jellyfin for new/updated items (in seconds).
+# Default: 1800s (30 minutes) so new videos are detected without needing a restart.
+LIBRARY_SCAN_INTERVAL = int(os.getenv('LIBRARY_SCAN_INTERVAL', '1800'))
 EXTRACTION_PRIORITY = os.getenv('EXTRACTION_PRIORITY', 'newest_first')
 EXTRACTION_BATCH_SIZE = int(os.getenv('EXTRACTION_BATCH_SIZE', '5'))
 AMBILIGHT_DATA_DIR = os.getenv("AMBILIGHT_DATA_DIR", "/app/data/ambilight")
@@ -139,7 +141,8 @@ class ExtractorDaemon:
             import threading as _t
             import queue as _q
             import socket
-            rq, eq = _q.Queue(), _q.Queue()
+            rq: "_q.Queue[str]" = _q.Queue()
+            eq: "_q.Queue[Exception]" = _q.Queue()
             def worker():
                 try:
                     infos = socket.getaddrinfo(self._jellyfin_parsed.hostname, None)
@@ -163,7 +166,8 @@ class ExtractorDaemon:
 
     def _jellyfin_base_resolved(self) -> tuple[str, dict]:
         if not self._jellyfin_parsed:
-            return JELLYFIN_BASE_URL, {}
+            # Fall back to raw base URL when parsing failed; host header empty
+            return JELLYFIN_BASE_URL or "", {}
         self._resolve_jellyfin_if_needed()
         host = self._jellyfin_resolved_ip or self._jellyfin_parsed.hostname
         port = f":{self._jellyfin_parsed.port}" if self._jellyfin_parsed.port else ''
@@ -303,38 +307,58 @@ class ExtractorDaemon:
             user_id = self.get_jellyfin_user_id()
         except Exception:
             user_id = None
+
+        last_library_scan = 0.0
+
         while not shutdown_event.is_set():
             try:
-                # Gate new extractions by time window
+                current_time = time.time()
+
+                # Always refresh library metadata periodically so newly added videos
+                # are discovered even when there is no pending extraction work.
+                # This ensures new videos are detected without needing a restart.
+                if current_time - last_library_scan >= LIBRARY_SCAN_INTERVAL:
+                    if user_id:
+                        try:
+                            logger.info("🔄 Scanning Jellyfin library for new/updated videos...")
+                            self.perform_incremental_library_update(user_id)
+                            last_library_scan = current_time
+                        except Exception as e:
+                            logger.warning(f"Library update failed: {e}")
+                            user_id = None
+                    else:
+                        # Try to get user_id again if we lost it
+                        try:
+                            user_id = self.get_jellyfin_user_id()
+                        except Exception:
+                            pass
+
+                # Gate *extraction* by time window (library scan above still runs)
                 if not self._within_window_now():
                     if self._window:
                         s, e = self._window
-                        wait_s = max(1, self._seconds_until_window_open())
-                        eta_minutes = wait_s // 60
-                        logger.info(
-                            f"⏳ Outside extraction window — next window {s//60:02d}:{s%60:02d}-{e//60:02d}:{e%60:02d}. Sleeping ~{eta_minutes} min"
-                        )
-                        # Sleep in chunks to allow responsive shutdown
-                        remaining = wait_s
-                        while remaining > 0 and not shutdown_event.is_set():
-                            chunk = 300 if remaining > 300 else remaining
-                            time.sleep(chunk)
-                            remaining -= chunk
+                        # Sleep in smaller chunks to allow periodic library scanning
+                        # even when outside extraction window
+                        chunk = min(300, LIBRARY_SCAN_INTERVAL)  # Sleep in 5min chunks or scan interval, whichever is smaller
+                        time.sleep(chunk)
+                        continue
                     else:
                         logger.info("⏳ Extraction window disabled — proceeding without restriction")
-                    continue
-                if user_id:
-                    try:
-                        self.perform_incremental_library_update(user_id)
-                    except Exception as e:
-                        logger.warning(f"Library update failed: {e}")
-                        user_id = None
+
                 stats = self.storage.get_extraction_statistics()
                 logger.info(f"📊 Extraction status: {stats['extracted_videos']}/{stats['total_videos']} ({stats['completion_percentage']:.1f}% complete, {stats['failed_videos']} failed)")
-                if stats['pending_videos'] <= 0:
-                    logger.info("✅ No pending videos to extract")
+                videos = self.storage.get_videos_needing_extraction(priority_order=EXTRACTION_PRIORITY, limit=EXTRACTION_BATCH_SIZE)
+                age_filtered_count = self.storage.get_age_filtered_count()
+
+                if len(videos) == 0:
+                    if age_filtered_count > 0:
+                        extraction_max_age_days = float(os.getenv("EXTRACTION_MAX_AGE_DAYS", "0"))
+                        logger.info(f"✅ No pending videos to extract (all {age_filtered_count} pending videos are older than EXTRACTION_MAX_AGE_DAYS={extraction_max_age_days} days)")
+                    else:
+                        logger.info("✅ No pending videos to extract")
+                    # Sleep before next iteration to avoid busy-waiting
+                    time.sleep(min(60, LIBRARY_SCAN_INTERVAL))  # Sleep 1 minute or scan interval, whichever is smaller
                 else:
-                    videos = self.storage.get_videos_needing_extraction(priority_order=EXTRACTION_PRIORITY, limit=EXTRACTION_BATCH_SIZE)
                     logger.info(f"🎬 Processing batch of {len(videos)} videos...")
                     for item in videos:
                         if shutdown_event.is_set():
@@ -398,10 +422,8 @@ class ExtractorDaemon:
                             self.storage.mark_extraction_failed(item['id'], f"Unexpected error: {str(e)}")
             except Exception as e:
                 logger.error(f"Extractor loop error: {e}")
-            for _ in range(LIBRARY_SCAN_INTERVAL):
-                if shutdown_event.is_set():
-                    break
-                time.sleep(1)
+                # Sleep on error to avoid tight error loop
+                time.sleep(60)
 
     def start(self):
         info = self.storage.get_storage_info()
@@ -440,7 +462,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-    print("📁 AMBILIGHT EXTRACTOR (CV2)")
+    print("📁 AMBILIGHT EXTRACTOR")
     print("=" * 50)
     d = ExtractorDaemon()
     d.start()
