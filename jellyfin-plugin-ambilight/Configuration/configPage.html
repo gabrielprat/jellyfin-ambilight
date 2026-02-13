@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Ambilight</title>
+</head>
+<body>
+    <div id="AmbilightConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-select,emby-checkbox">
+        <div data-role="content">
+            <div class="content-primary">
+                
+                <!-- Tab Navigation -->
+                <div class="verticalSection">
+                    <div class="sectionTitleContainer flex align-items-center">
+                        <h2 class="sectionTitle">Ambilight Plugin</h2>
+                    </div>
+                    <div class="selectContainer" style="margin-bottom: 2em;">
+                        <select id="tabSelector" is="emby-select" class="emby-select-withcolor emby-select">
+                            <option value="settings">Settings</option>
+                            <option value="manager">Extraction Manager</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Settings Tab -->
+                <div id="settingsTab">
+                <form id="AmbilightConfigForm">
+                    <h2 class="sectionTitle">Extraction</h2>
+                    
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="ExtractViewed" type="checkbox" is="emby-checkbox" />
+                            <span>Extract already viewed media</span>
+                        </label>
+                        <div class="fieldDescription">When enabled, ambilight data is also extracted for videos marked as "played".</div>
+                    </div>
+
+                    <div class="selectContainer">
+                        <label class="selectLabel" for="ExtractionPriority">Extraction priority</label>
+                        <select is="emby-select" id="ExtractionPriority" class="emby-select-withcolor emby-select">
+                            <option value="newest_first">Newest first</option>
+                            <option value="oldest_first">Oldest first</option>
+                            <option value="alphabetical">Alphabetical</option>
+                            <option value="movies_newest_first">Movies newest first</option>
+                        </select>
+                        <div class="fieldDescription">Order in which pending videos are extracted.</div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="AmbilightSmoothSeconds">Smoothing window (seconds)</label>
+                        <input id="AmbilightSmoothSeconds" type="number" is="emby-input" step="0.01" />
+                        <div class="fieldDescription">
+                            Time window for temporal smoothing between frames, in seconds (default 0.12). Set to 0 to disable smoothing. Higher values = smoother but more delayed; lower values = more responsive but can flicker on rapid cuts.
+                        </div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="ExtractionMaxAgeDays">Maximum age (days)</label>
+                        <input id="ExtractionMaxAgeDays" type="number" is="emby-input" min="0" step="0.1" />
+                        <div class="fieldDescription">Skip videos older than this many days (0 = no age limit).</div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="ExtractionStartTime">Extraction start time (HH:MM)</label>
+                        <input id="ExtractionStartTime" type="text" is="emby-input" placeholder="00:00" />
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="ExtractionEndTime">Extraction end time (HH:MM)</label>
+                        <input id="ExtractionEndTime" type="text" is="emby-input" placeholder="23:59" />
+                        <div class="fieldDescription">Optional daily time window for heavy extraction work (supports crossing midnight).</div>
+                    </div>
+
+                    <div class="selectContainer">
+                        <label class="selectLabel" for="ExcludedLibraries">Excluded libraries</label>
+                        <select id="ExcludedLibraries" is="emby-select" class="emby-select-withcolor emby-select" multiple>
+                        </select>
+                        <div class="fieldDescription">Libraries to skip when extracting ambilight data.</div>
+                    </div>
+
+                    <h2 class="sectionTitle">Storage</h2>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="AmbilightDataFolder">Ambilight data folder</label>
+                        <div style="display: flex; gap: 0.5em; align-items: center;">
+                            <input id="AmbilightDataFolder" type="text" is="emby-input" placeholder="/data/ambilight" style="flex: 1;" />
+                            <button type="button" id="btnBrowseDataFolder" is="emby-button" class="raised button-submit emby-button">Browse</button>
+                        </div>
+                        <div class="fieldDescription">Folder where binary files are stored (filenames: ItemId.bin). Use Browse to pick a folder.</div>
+                    </div>
+                    <div id="folderBrowserModal" style="display: none; position: fixed; z-index: 10000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6);">
+                        <div style="max-width: 500px; margin: 2em auto; background: var(--bg); padding: 1.5em; border-radius: 8px;">
+                            <h3 style="margin-top: 0;">Select folder</h3>
+                            <div style="margin-bottom: 0.5em;">
+                                <input type="text" id="folderBrowserPath" is="emby-input" style="margin-bottom: 0.5em;" placeholder="e.g. /data/ambilight" />
+                            </div>
+                            <div id="folderBrowserList" style="max-height: 300px; overflow-y: auto; margin-bottom: 1em;"></div>
+                            <div style="display: flex; gap: 0.5em;">
+                                <button type="button" id="folderBrowserSelect" is="emby-button" class="raised button-submit">Select this folder</button>
+                                <button type="button" id="folderBrowserCancel" is="emby-button" class="raised">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <h2 class="sectionTitle">WLED / Device Mapping</h2>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="DefaultWledHost">Default WLED host</label>
+                        <input id="DefaultWledHost" type="text" is="emby-input" placeholder="192.168.1.100" />
+                        <div class="fieldDescription">Fallback WLED host when no device mapping matches.</div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="DefaultWledUdpPort">Default WLED UDP port</label>
+                        <input id="DefaultWledUdpPort" type="number" is="emby-input" min="1" max="65535" />
+                        <div class="fieldDescription">UDP port for WLED (default: 19446).</div>
+                    </div>
+
+                    <div class="selectContainer">
+                        <label class="selectLabel" for="AllowedDevices">Devices with Ambilight enabled</label>
+                        <select id="AllowedDevices" is="emby-select" class="emby-select-withcolor emby-select" multiple>
+                        </select>
+                        <div class="fieldDescription">Ambilight will only play when the session comes from one of the selected devices. Leave empty to allow all devices.</div>
+                    </div>
+
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="Debug" type="checkbox" is="emby-checkbox" />
+                            <span>Debug (verbose logging)</span>
+                        </label>
+                        <div class="fieldDescription">Log play/pause/seek, binary found/loaded, WLED connection and broadcast. Check when troubleshooting why lights do not react.</div>
+                    </div>
+
+                    <h2 class="sectionTitle">LED Layout</h2>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="AmbilightTopLedCount">Top LED count</label>
+                        <input id="AmbilightTopLedCount" type="number" is="emby-input" min="0" />
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="AmbilightBottomLedCount">Bottom LED count</label>
+                        <input id="AmbilightBottomLedCount" type="number" is="emby-input" min="0" />
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="AmbilightLeftLedCount">Left LED count</label>
+                        <input id="AmbilightLeftLedCount" type="number" is="emby-input" min="0" />
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="AmbilightRightLedCount">Right LED count</label>
+                        <input id="AmbilightRightLedCount" type="number" is="emby-input" min="0" />
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="AmbilightInputPosition">Input position</label>
+                        <input id="AmbilightInputPosition" type="number" is="emby-input" min="0" />
+                        <div class="fieldDescription">Index of the first LED in the physical strip (from top-left, looking at the screen).</div>
+                    </div>
+
+                    <h2 class="sectionTitle">Color Tuning</h2>
+
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="AmbilightRgbw" type="checkbox" is="emby-checkbox" />
+                            <span>Use RGBW strips</span>
+                        </label>
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="AmbilightGamma">Base gamma</label>
+                        <input id="AmbilightGamma" type="number" is="emby-input" step="0.1" />
+                        <div class="fieldDescription">
+                            Overall gamma curve (default 2.2). Higher values make mid-tones and highlights darker and more contrasty; lower values make the image brighter but can wash out detail.
+                        </div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="AmbilightSaturation">Saturation</label>
+                        <input id="AmbilightSaturation" type="number" is="emby-input" step="0.1" />
+                        <div class="fieldDescription">
+                            Color saturation multiplier (default 1.0). Higher values make colors more vivid; lower values make them more muted and neutral.
+                        </div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="AmbilightBrightnessTarget">Brightness target</label>
+                        <input id="AmbilightBrightnessTarget" type="number" is="emby-input" step="1" />
+                        <div class="fieldDescription">
+                            Target average LED brightness (default 60). Higher values make the overall effect brighter; lower values dim the strip while still adapting per scene.
+                        </div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="AmbilightGammaRed">Red gamma</label>
+                        <input id="AmbilightGammaRed" type="number" is="emby-input" step="0.1" />
+                        <div class="fieldDescription">
+                            Per‑channel gamma for red. Higher = darker reds; lower = brighter reds. Use to balance red against green/blue.
+                        </div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="AmbilightGammaGreen">Green gamma</label>
+                        <input id="AmbilightGammaGreen" type="number" is="emby-input" step="0.1" />
+                        <div class="fieldDescription">
+                            Per‑channel gamma for green. Higher = darker greens; lower = brighter greens. Use to correct a green tint.
+                        </div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="AmbilightGammaBlue">Blue gamma</label>
+                        <input id="AmbilightGammaBlue" type="number" is="emby-input" step="0.1" />
+                        <div class="fieldDescription">
+                            Per‑channel gamma for blue. Higher = darker blues; lower = brighter blues. Increase this if the image looks too blue.
+                        </div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="AmbilightRedBoost">Red boost</label>
+                        <input id="AmbilightRedBoost" type="number" is="emby-input" step="0.1" />
+                        <div class="fieldDescription">
+                            Minimum floor for red when LEDs are dim (used with Min LED brightness). Higher values keep red visible in dark scenes; too high can tint blacks towards red.
+                        </div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="AmbilightGreenBoost">Green boost</label>
+                        <input id="AmbilightGreenBoost" type="number" is="emby-input" step="0.1" />
+                        <div class="fieldDescription">
+                            Minimum floor for green when LEDs are dim. Higher values keep green present in shadows; too high can give a greenish cast to dark areas.
+                        </div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="AmbilightBlueBoost">Blue boost</label>
+                        <input id="AmbilightBlueBoost" type="number" is="emby-input" step="0.1" />
+                        <div class="fieldDescription">
+                            Minimum floor for blue when LEDs are dim. Higher values keep blue visible in dark scenes; too high makes everything look cold/blue.
+                        </div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="AmbilightMinLedBrightness">Min LED brightness</label>
+                        <input id="AmbilightMinLedBrightness" type="number" is="emby-input" step="0.1" />
+                        <div class="fieldDescription">
+                            Global minimum LED brightness (0 = true black). Higher values prevent LEDs from turning fully off, but combined with color boosts can introduce a color tint in very dark scenes.
+                        </div>
+                    </div>
+
+                    <div>
+                        <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                            <span>Save</span>
+                        </button>
+                    </div>
+                </form>
+                </div>
+
+                <!-- Manager Tab -->
+                <div id="managerTab" style="display: none;">
+                    <h2 class="sectionTitle">Extraction Manager</h2>
+                    <p class="sectionSubTitle">Manage ambilight data extraction for your video library</p>
+
+                    <div style="display: flex; gap: 1em; margin-bottom: 1em; flex-wrap: wrap;">
+                        <button id="btnRefresh" is="emby-button" class="raised button-submit">
+                            <span class="material-icons" style="vertical-align: middle;">refresh</span>
+                            Refresh
+                        </button>
+                        <button id="btnExtractAll" is="emby-button" class="raised button-submit">
+                            <span class="material-icons" style="vertical-align: middle;">play_arrow</span>
+                            Extract All Pending
+                        </button>
+                        <input id="searchBox" type="text" is="emby-input" placeholder="Search videos..." style="flex: 1; min-width: 200px;">
+                    </div>
+
+                    <div style="display: flex; gap: 2em; margin-bottom: 1em;">
+                        <div style="padding: 0.5em;">
+                            <span class="material-icons" style="color: #4ade80; vertical-align: middle;">check_circle</span>
+                            <span id="statsExtracted">0</span> Extracted
+                        </div>
+                        <div style="padding: 0.5em;">
+                            <span class="material-icons" style="color: #fbbf24; vertical-align: middle;">pending</span>
+                            <span id="statsPending">0</span> Pending
+                        </div>
+                        <div style="padding: 0.5em;">
+                            <span class="material-icons" style="color: #ef4444; vertical-align: middle;">error</span>
+                            <span id="statsFailed">0</span> Failed
+                        </div>
+                    </div>
+
+                    <div id="loadingMessage" style="text-align: center; padding: 2em;">
+                        <p>Loading library...</p>
+                    </div>
+
+                    <div id="videoList" style="display: none;">
+                        <table class="tblLibrary" style="width: 100%;">
+                            <thead>
+                                <tr>
+                                    <th>Title</th>
+                                    <th>Status</th>
+                                    <th>Size</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="videoTableBody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+        <script type="text/javascript">
+            var AmbilightConfig = {
+                pluginUniqueId: 'b3f6b4c7-0a3d-4bd4-a7e3-c8d5a0a1e3f0'
+            };
+
+            document.querySelector('#AmbilightConfigPage')
+                .addEventListener('pageshow', function() {
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(AmbilightConfig.pluginUniqueId).then(function (config) {
+                        document.querySelector('#ExtractViewed').checked = config.ExtractViewed;
+                        document.querySelector('#ExtractionPriority').value = config.ExtractionPriority;
+                        document.querySelector('#ExtractionMaxAgeDays').value = config.ExtractionMaxAgeDays;
+                        document.querySelector('#ExtractionStartTime').value = config.ExtractionStartTime;
+                        document.querySelector('#ExtractionEndTime').value = config.ExtractionEndTime;
+                        document.querySelector('#AmbilightDataFolder').value = config.AmbilightDataFolder || '/data/ambilight';
+                        document.querySelector('#AmbilightSmoothSeconds').value = (config.AmbilightSmoothSeconds != null ? config.AmbilightSmoothSeconds : 0.12);
+                        document.querySelector('#Debug').checked = config.Debug === true;
+                        
+                        document.querySelector('#DefaultWledHost').value = config.DefaultWledHost;
+                        document.querySelector('#DefaultWledUdpPort').value = config.DefaultWledUdpPort;
+                        
+                        document.querySelector('#AmbilightTopLedCount').value = config.AmbilightTopLedCount;
+                        document.querySelector('#AmbilightBottomLedCount').value = config.AmbilightBottomLedCount;
+                        document.querySelector('#AmbilightLeftLedCount').value = config.AmbilightLeftLedCount;
+                        document.querySelector('#AmbilightRightLedCount').value = config.AmbilightRightLedCount;
+                        document.querySelector('#AmbilightInputPosition').value = config.AmbilightInputPosition;
+                        
+                        document.querySelector('#AmbilightRgbw').checked = config.AmbilightRgbw;
+                        document.querySelector('#AmbilightGamma').value = config.AmbilightGamma;
+                        document.querySelector('#AmbilightSaturation').value = config.AmbilightSaturation;
+                        document.querySelector('#AmbilightBrightnessTarget').value = config.AmbilightBrightnessTarget;
+
+                        // Per-channel gamma and boosts
+                        document.querySelector('#AmbilightGammaRed').value = config.AmbilightGammaRed;
+                        document.querySelector('#AmbilightGammaGreen').value = config.AmbilightGammaGreen;
+                        document.querySelector('#AmbilightGammaBlue').value = config.AmbilightGammaBlue;
+                        document.querySelector('#AmbilightRedBoost').value = config.AmbilightRedBoost;
+                        document.querySelector('#AmbilightGreenBoost').value = config.AmbilightGreenBoost;
+                        document.querySelector('#AmbilightBlueBoost').value = config.AmbilightBlueBoost;
+                        document.querySelector('#AmbilightMinLedBrightness').value = config.AmbilightMinLedBrightness;
+
+                        // Populate excluded libraries and allowed devices
+                        loadLibraries(config);
+                        loadDevices(config);
+
+                        Dashboard.hideLoadingMsg();
+                    });
+                });
+
+            document.querySelector('#AmbilightConfigForm')
+                .addEventListener('submit', function(e) {
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(AmbilightConfig.pluginUniqueId).then(function (config) {
+                    config.ExtractViewed = document.querySelector('#ExtractViewed').checked;
+                    config.ExtractionPriority = document.querySelector('#ExtractionPriority').value;
+                    config.ExtractionMaxAgeDays = document.querySelector('#ExtractionMaxAgeDays').value;
+                    config.ExtractionStartTime = document.querySelector('#ExtractionStartTime').value;
+                    config.ExtractionEndTime = document.querySelector('#ExtractionEndTime').value;
+                    config.AmbilightDataFolder = document.querySelector('#AmbilightDataFolder').value || '/data/ambilight';
+                    config.AmbilightSmoothSeconds = parseFloat(document.querySelector('#AmbilightSmoothSeconds').value || '0.12');
+                    config.Debug = document.querySelector('#Debug').checked === true;
+                    
+                    config.DefaultWledHost = document.querySelector('#DefaultWledHost').value;
+                    config.DefaultWledUdpPort = document.querySelector('#DefaultWledUdpPort').value;
+                    
+                    config.AmbilightTopLedCount = document.querySelector('#AmbilightTopLedCount').value;
+                    config.AmbilightBottomLedCount = document.querySelector('#AmbilightBottomLedCount').value;
+                    config.AmbilightLeftLedCount = document.querySelector('#AmbilightLeftLedCount').value;
+                    config.AmbilightRightLedCount = document.querySelector('#AmbilightRightLedCount').value;
+                    config.AmbilightInputPosition = document.querySelector('#AmbilightInputPosition').value;
+                    
+                    config.AmbilightRgbw = document.querySelector('#AmbilightRgbw').checked;
+                    config.AmbilightGamma = document.querySelector('#AmbilightGamma').value;
+                    config.AmbilightSaturation = document.querySelector('#AmbilightSaturation').value;
+                    config.AmbilightBrightnessTarget = document.querySelector('#AmbilightBrightnessTarget').value;
+
+                    config.AmbilightGammaRed = document.querySelector('#AmbilightGammaRed').value;
+                    config.AmbilightGammaGreen = document.querySelector('#AmbilightGammaGreen').value;
+                    config.AmbilightGammaBlue = document.querySelector('#AmbilightGammaBlue').value;
+                    config.AmbilightRedBoost = document.querySelector('#AmbilightRedBoost').value;
+                    config.AmbilightGreenBoost = document.querySelector('#AmbilightGreenBoost').value;
+                    config.AmbilightBlueBoost = document.querySelector('#AmbilightBlueBoost').value;
+                    config.AmbilightMinLedBrightness = document.querySelector('#AmbilightMinLedBrightness').value;
+
+                    // Excluded libraries
+                    var excluded = [];
+                    var libSelect = document.getElementById('ExcludedLibraries');
+                    if (libSelect) {
+                        for (var i = 0; i < libSelect.options.length; i++) {
+                            var opt = libSelect.options[i];
+                            if (opt.selected && opt.value) {
+                                excluded.push(opt.value);
+                            }
+                        }
+                    }
+                    config.ExcludedLibraryIds = excluded;
+
+                    // Allowed devices
+                    var allowed = [];
+                    var devSelect = document.getElementById('AllowedDevices');
+                    if (devSelect) {
+                        for (var j = 0; j < devSelect.options.length; j++) {
+                            var opt2 = devSelect.options[j];
+                            if (opt2.selected && opt2.value) {
+                                allowed.push(opt2.value);
+                            }
+                        }
+                    }
+                    config.AllowedDeviceIds = allowed;
+                    
+                    ApiClient.updatePluginConfiguration(AmbilightConfig.pluginUniqueId, config).then(function (result) {
+                        Dashboard.processPluginConfigurationUpdateResult(result);
+                    });
+                });
+
+                e.preventDefault();
+                return false;
+            });
+
+            // ===== FOLDER BROWSER (Storage path) – same behaviour as Jellyfin library path picker =====
+            (function () {
+                var modal = document.getElementById('folderBrowserModal');
+                var pathInput = document.getElementById('folderBrowserPath');
+                var listEl = document.getElementById('folderBrowserList');
+                var dataFolderInput = document.getElementById('AmbilightDataFolder');
+                var currentBrowsePath = '';
+
+                function addRow(name, fullPath, isParent) {
+                    var row = document.createElement('div');
+                    row.style.cssText = 'padding: 0.5em; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center;';
+                    if (isParent) {
+                        row.innerHTML = '<span class="material-icons" style="margin-right: 0.5em; font-size: 1.2em;">drive_file_move</span><strong>' + (name || '..') + '</strong>';
+                    } else {
+                        row.innerHTML = '<span class="material-icons" style="margin-right: 0.5em; font-size: 1.2em;">folder</span>' + (name || fullPath);
+                    }
+                    row.title = fullPath || name;
+                    row.addEventListener('click', function () {
+                        currentBrowsePath = fullPath || name;
+                        pathInput.value = currentBrowsePath;
+                        loadDirectoryContents(currentBrowsePath);
+                    });
+                    listEl.appendChild(row);
+                }
+
+                function loadDirectoryContents(path) {
+                    listEl.innerHTML = '<p>Loading...</p>';
+                    currentBrowsePath = path || '';
+
+                    if (!path || path === '') {
+                        pathInput.value = '';
+                        var drivesUrl = ApiClient.getUrl('Environment/Drives');
+                        ApiClient.getJSON(drivesUrl).then(function (entries) {
+                            listEl.innerHTML = '';
+                            if (!entries || entries.length === 0) {
+                                listEl.appendChild(document.createTextNode('No drives found. Type the path above (e.g. /data/ambilight) and click Select this folder.'));
+                                return;
+                            }
+                            entries.forEach(function (e) {
+                                var name = e.Name || e.Path || '';
+                                var fullPath = e.Path || name;
+                                if (!fullPath) return;
+                                addRow(name, fullPath, false);
+                            });
+                        }).catch(function (err) {
+                            listEl.innerHTML = '';
+                            listEl.appendChild(document.createTextNode('Could not load drives. Type the path above (e.g. /data/ambilight) and click Select.'));
+                        });
+                        return;
+                    }
+
+                    pathInput.value = path;
+                    listEl.innerHTML = '';
+                    var parentUrl = ApiClient.getUrl('Environment/ParentPath', { path: path });
+                    var contentsUrl = ApiClient.getUrl('Environment/DirectoryContents', { path: path, includeFiles: false, includeDirectories: true });
+                    var parentPromise = ApiClient.getJSON(parentUrl).catch(function () { return null; });
+                    var contentsPromise = ApiClient.getJSON(contentsUrl);
+                    Promise.all([parentPromise, contentsPromise]).then(function (results) {
+                        var parentPath = results[0];
+                        var entries = results[1];
+                        if (parentPath != null && parentPath !== '') {
+                            addRow('.. (Parent)', parentPath, true);
+                        }
+                        if (!entries || entries.length === 0) {
+                            if (listEl.children.length === 0) {
+                                listEl.appendChild(document.createTextNode('(empty folder – you can still select this path)'));
+                            }
+                            return;
+                        }
+                        entries.forEach(function (e) {
+                            var isDir = e.Type === 'Directory' || e.IsDirectory === true;
+                            if (!isDir) return;
+                            var name = e.Name || e.Path || '';
+                            var fullPath = e.Path || (path.replace(/\/?$/, '') + '/' + name);
+                            if (!name) return;
+                            addRow(name, fullPath, false);
+                        });
+                    }).catch(function (err) {
+                        listEl.innerHTML = '';
+                        listEl.appendChild(document.createTextNode('Cannot list folder (e.g. permissions). Type or paste the path above and click Select this folder.'));
+                    });
+                }
+
+                document.getElementById('btnBrowseDataFolder').addEventListener('click', function () {
+                    currentBrowsePath = (dataFolderInput.value || '').trim() || '';
+                    pathInput.value = currentBrowsePath || '';
+                    modal.style.display = 'block';
+                    if (currentBrowsePath) {
+                        loadDirectoryContents(currentBrowsePath);
+                    } else {
+                        loadDirectoryContents('');
+                    }
+                });
+
+                document.getElementById('folderBrowserSelect').addEventListener('click', function () {
+                    dataFolderInput.value = (pathInput.value || currentBrowsePath || '').trim() || '/data/ambilight';
+                    modal.style.display = 'none';
+                });
+
+                document.getElementById('folderBrowserCancel').addEventListener('click', function () {
+                    modal.style.display = 'none';
+                });
+
+                modal.addEventListener('click', function (e) {
+                    if (e.target === modal) modal.style.display = 'none';
+                });
+            })();
+
+            // ===== MANAGER TAB LOGIC =====
+            let allVideos = [];
+            let currentFilter = '';
+
+            function showToast(msg) {
+                if (typeof require === 'function') {
+                    try {
+                        require(['toast'], function(toast) { toast(msg); });
+                    } catch (e) {
+                        if (typeof alert !== 'undefined') alert(msg); else console.log(msg);
+                    }
+                } else {
+                    if (typeof alert !== 'undefined') alert(msg); else console.log(msg);
+                }
+            }
+
+            function loadLibraries(config) {
+                var select = document.getElementById('ExcludedLibraries');
+                if (!select) return;
+
+                ApiClient.getUserViews(ApiClient.getCurrentUserId()).then(function (result) {
+                    select.innerHTML = '';
+                    var items = (result && result.Items) || [];
+                    var excluded = config.ExcludedLibraryIds || [];
+
+                    items.forEach(function (view) {
+                        var opt = document.createElement('option');
+                        opt.value = view.Id;
+                        opt.textContent = view.Name;
+                        if (excluded.indexOf(view.Id) !== -1) {
+                            opt.selected = true;
+                        }
+                        select.appendChild(opt);
+                    });
+                }).catch(function (e) {
+                    console.log('[Ambilight] Failed to load libraries', e);
+                });
+            }
+
+            function loadDevices(config) {
+                var select = document.getElementById('AllowedDevices');
+                if (!select) return;
+
+                select.innerHTML = '';
+                var allowed = config.AllowedDeviceIds || [];
+
+                // Show all known devices (as in Jellyfin's Devices admin page),
+                // and gate playback by the same persistent device Ids.
+                try {
+                    var url = ApiClient.getUrl('Devices');
+                    ApiClient.getJSON(url).then(function (devices) {
+                        if (!devices) {
+                            return;
+                        }
+                        var list = devices.Items || devices; // handle both { Items: [] } and [] shapes
+                        (list || []).forEach(function (d) {
+                            var deviceId = d.Id || d.DeviceId;
+                            if (!deviceId) {
+                                return;
+                            }
+                            var name = d.Name || d.DeviceName || d.AppName || deviceId;
+                            var opt = document.createElement('option');
+                            opt.value = deviceId;
+                            opt.textContent = name;
+                            if (allowed.indexOf(deviceId) !== -1) {
+                                opt.selected = true;
+                            }
+                            select.appendChild(opt);
+                        });
+                    }).catch(function (e) {
+                        console.log('[Ambilight] Failed to load Devices API list', e);
+                    });
+                } catch (e) {
+                    console.log('[Ambilight] Error building Devices API URL', e);
+                }
+            }
+
+            // Tab switching
+            document.getElementById('tabSelector').addEventListener('change', function(e) {
+                const tab = e.target.value;
+                if (tab === 'settings') {
+                    document.getElementById('settingsTab').style.display = 'block';
+                    document.getElementById('managerTab').style.display = 'none';
+                } else {
+                    document.getElementById('settingsTab').style.display = 'none';
+                    document.getElementById('managerTab').style.display = 'block';
+                    if (allVideos.length === 0) {
+                        loadLibrary();
+                    }
+                }
+            });
+
+            async function loadLibrary() {
+                try {
+                    Dashboard.showLoadingMsg();
+                    
+                    const query = {
+                        IncludeItemTypes: 'Movie,Episode',
+                        Recursive: true,
+                        Fields: 'Path,DateCreated',
+                        SortBy: 'SortName',
+                        SortOrder: 'Ascending'
+                    };
+
+                    const result = await ApiClient.getItems(ApiClient.getCurrentUserId(), query);
+                    allVideos = result.Items || [];
+
+                    const statusPromises = allVideos.map(async (video) => {
+                        try {
+                            // Use plain string concatenation to avoid any templating quirks
+                            var statusUrl = '/Ambilight/Status/' + video.Id;
+                            const response = await fetch(statusUrl, { credentials: 'include' });
+                            if (response.ok) {
+                                video.ambilightStatus = await response.json();
+                            } else {
+                                video.ambilightStatus = { HasBinary: false, BinarySize: 0 };
+                            }
+                        } catch (e) {
+                            video.ambilightStatus = { HasBinary: false, BinarySize: 0, error: true };
+                        }
+                        return video;
+                    });
+
+                    await Promise.all(statusPromises);
+
+                    updateStatistics();
+                    renderVideoList();
+
+                    document.getElementById('loadingMessage').style.display = 'none';
+                    document.getElementById('videoList').style.display = 'block';
+
+                    Dashboard.hideLoadingMsg();
+                } catch (error) {
+                    console.error('Error loading library:', error);
+                    Dashboard.hideLoadingMsg();
+                    showToast('Failed to load library: ' + error.message);
+                }
+            }
+
+            function updateStatistics() {
+                const extracted = allVideos.filter(v => v.ambilightStatus?.HasBinary).length;
+                const failed = allVideos.filter(v => v.ambilightStatus?.error).length;
+                const pending = allVideos.length - extracted - failed;
+
+                document.getElementById('statsExtracted').textContent = extracted;
+                document.getElementById('statsPending').textContent = pending;
+                document.getElementById('statsFailed').textContent = failed;
+            }
+
+            function escapeHtml(text) {
+                if (text == null) return '';
+                var div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+
+            function renderVideoList() {
+                const tbody = document.getElementById('videoTableBody');
+                tbody.innerHTML = '';
+
+                const filteredVideos = allVideos.filter(function(video) {
+                    if (!currentFilter) return true;
+                    return (video.Name || '').toLowerCase().indexOf(currentFilter.toLowerCase()) !== -1;
+                });
+
+                filteredVideos.forEach(function(video) {
+                    const row = document.createElement('tr');
+                    const status = video.ambilightStatus;
+                    var statusIcon = 'pending';
+                    var statusText = 'Pending';
+                    var statusColor = '#fbbf24';
+                    if (status && status.error) {
+                        statusIcon = 'error';
+                        statusText = 'Failed';
+                        statusColor = '#ef4444';
+                    } else if (status && status.HasBinary) {
+                        statusIcon = 'check_circle';
+                        statusText = 'Extracted';
+                        statusColor = '#4ade80';
+                    }
+                    var sizeText = '-';
+                    if (status && status.HasBinary && status.BinarySize != null) {
+                        sizeText = (status.BinarySize / 1024 / 1024).toFixed(2) + ' MB';
+                    }
+                    var videoName = video.Name || '';
+                    var videoId = video.Id || '';
+                    var btnDisabled = (status && status.HasBinary) ? ' disabled' : '';
+                    var btnLabel = (status && status.HasBinary) ? 'Extracted' : 'Extract';
+                    row.innerHTML = '<td>' + escapeHtml(videoName) + '</td>' +
+                        '<td><span class="material-icons" style="color:' + statusColor + ';vertical-align:middle;font-size:1.2em;">' + statusIcon + '</span> ' + statusText + '</td>' +
+                        '<td>' + sizeText + '</td>' +
+                        '<td><button class="btnExtractVideo" data-id="' + escapeHtml(videoId) + '" data-name="' + escapeHtml(videoName) + '"' + btnDisabled + ' is="emby-button" class="raised button-submit">' + btnLabel + '</button></td>';
+                    tbody.appendChild(row);
+                });
+
+                document.querySelectorAll('.btnExtractVideo').forEach(function(btn) {
+                    btn.addEventListener('click', function() {
+                        var itemId = this.getAttribute('data-id');
+                        var itemName = this.getAttribute('data-name');
+                        extractVideo(itemId, itemName, this);
+                    });
+                });
+            }
+
+            async function extractVideo(itemId, itemName, button) {
+                try {
+                    button.disabled = true;
+                    button.textContent = 'Extracting...';
+
+                    var extractUrl = '/Ambilight/Extract/' + itemId;
+                    const response = await fetch(extractUrl, {
+                        method: 'POST',
+                        credentials: 'include'
+                    });
+
+                    if (response.ok) {
+                        showToast('Extraction started for: ' + itemName);
+                        setTimeout(function() { loadLibrary(); }, 2000);
+                    } else {
+                        throw new Error('Failed to start extraction');
+                    }
+                } catch (error) {
+                    console.error('Error extracting video:', error);
+                    showToast('Failed to extract: ' + itemName);
+                    button.disabled = false;
+                    button.textContent = 'Extract';
+                }
+            }
+
+            async function extractAllPending() {
+                const pending = allVideos.filter(function(v) { return !(v.ambilightStatus && (v.ambilightStatus.HasBinary || v.ambilightStatus.error)); });
+                
+                if (pending.length === 0) {
+                    showToast('No pending videos to extract');
+                    return;
+                }
+
+                if (!confirm('Extract ambilight data for ' + pending.length + ' videos?')) {
+                    return;
+                }
+
+                Dashboard.showLoadingMsg();
+
+                for (const video of pending) {
+                        try {
+                            var extractUrl = '/Ambilight/Extract/' + (video.Id || '');
+                            await fetch(extractUrl, {
+                                method: 'POST',
+                                credentials: 'include'
+                            });
+                    } catch (e) {
+                        console.error('Failed to extract:', video.Name, e);
+                    }
+                }
+
+                Dashboard.hideLoadingMsg();
+                showToast('Started extraction for ' + pending.length + ' videos');
+
+                setTimeout(function() { loadLibrary(); }, 3000);
+            }
+
+            // Event handlers for manager tab
+            if (document.getElementById('btnRefresh')) {
+                document.getElementById('btnRefresh').addEventListener('click', loadLibrary);
+            }
+            if (document.getElementById('btnExtractAll')) {
+                document.getElementById('btnExtractAll').addEventListener('click', extractAllPending);
+            }
+            if (document.getElementById('searchBox')) {
+                document.getElementById('searchBox').addEventListener('input', function(e) {
+                    currentFilter = e.target.value;
+                    renderVideoList();
+                });
+            }
+        </script>
+    </div>
+</body>
+</html>

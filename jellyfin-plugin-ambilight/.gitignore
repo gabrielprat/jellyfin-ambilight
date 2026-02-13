@@ -1,0 +1,22 @@
+bin/
+obj/
+publish/
+Binaries/
+
+*.user
+*.userprefs
+*.suo
+*.tmp
+*.log
+*.cache
+*.DS_Store
+
+# Rider / VS Code / IDE metadata
+.idea/
+.vs/
+.vscode/
+
+# Local test artifacts
+TestResults/
+coverage/
+
