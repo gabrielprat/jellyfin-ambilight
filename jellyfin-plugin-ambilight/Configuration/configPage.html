@@ -844,7 +844,29 @@
                     var seriesExtractedCount = allEpisodes.filter(function(e) { return e.ambilightStatus?.HasBinary; }).length;
                     var seriesFailedCount = allEpisodes.filter(function(e) { return e.ambilightStatus?.error; }).length;
                     var seriesPendingCount = allEpisodes.length - seriesExtractedCount - seriesFailedCount;
-
+                    
+                    // Determine series status
+                    var seriesStatusIcon = 'pending';
+                    var seriesStatusText = 'Pending';
+                    var seriesStatusColor = '#fbbf24';
+                    
+                    if (seriesFailedCount > 0) {
+                        // Failed: if ANY extraction failed
+                        seriesStatusIcon = 'error';
+                        seriesStatusText = 'Failed';
+                        seriesStatusColor = '#ef4444';
+                    } else if (seriesPendingCount === 0 && seriesExtractedCount === allEpisodes.length) {
+                        // Extracted: if ALL episodes have been extracted
+                        seriesStatusIcon = 'check_circle';
+                        seriesStatusText = 'Extracted';
+                        seriesStatusColor = '#4ade80';
+                    } else {
+                        // Pending: if there are some episodes extracted but some pending
+                        seriesStatusIcon = 'pending';
+                        seriesStatusText = 'Pending';
+                        seriesStatusColor = '#fbbf24';
+                    }
+                    
                     // Series header row (level 1)
                     var seriesRow = document.createElement('tr');
                     seriesRow.className = 'series-header';
@@ -852,20 +874,21 @@
                     seriesRow.style.cursor = 'pointer';
                     seriesRow.style.fontWeight = 'bold';
                     seriesRow.style.fontSize = '1.05em';
-
+                    
                     var seriesCollapsedId = 'series-' + seriesId;
                     // Default to collapsed if not set in localStorage
                     var storedState = localStorage.getItem(seriesCollapsedId);
                     var isSeriesCollapsed = storedState === null ? true : storedState === 'collapsed';
-
+                    
                     var seriesExpandIcon = isSeriesCollapsed ? 'chevron_right' : 'expand_more';
+                    var seriesStatusHtml = '<span class="material-icons" style="color:' + seriesStatusColor + ';vertical-align:middle;font-size:1.1em;margin-left:0.5em;">' + seriesStatusIcon + '</span><span style="color:' + seriesStatusColor + ';margin-left:0.3em;font-weight:normal;font-size:0.95em;">' + seriesStatusText + '</span>';
                     var seriesStatsHtml = '<span style="font-weight: normal; font-size: 0.9em; opacity: 0.8;"> (' + seasonKeys.length + ' seasons, ' + allEpisodes.length + ' episodes: ' + seriesExtractedCount + ' extracted, ' + seriesPendingCount + ' pending' + (seriesFailedCount > 0 ? ', ' + seriesFailedCount + ' failed' : '') + ')</span>';
-
-                    seriesRow.innerHTML = '<td colspan="5"><span class="material-icons" style="vertical-align: middle; font-size: 1.2em;">' + seriesExpandIcon + '</span> ' +
-                        escapeHtml(series.name) + seriesStatsHtml + '</td>';
+                    
+                    seriesRow.innerHTML = '<td colspan="5"><span class="material-icons" style="vertical-align: middle; font-size: 1.2em;">' + seriesExpandIcon + '</span> ' + 
+                        escapeHtml(series.name) + seriesStatusHtml + seriesStatsHtml + '</td>';
                     seriesRow.setAttribute('data-series-id', seriesCollapsedId);
                     seriesRow.setAttribute('data-collapsed', isSeriesCollapsed ? 'true' : 'false');
-
+                    
                     tbody.appendChild(seriesRow);
 
                     // Season header rows (level 2) and episode rows (level 3)
@@ -877,7 +900,26 @@
                         var extractedCount = episodes.filter(function(e) { return e.ambilightStatus?.HasBinary; }).length;
                         var failedCount = episodes.filter(function(e) { return e.ambilightStatus?.error; }).length;
                         var pendingCount = episodes.length - extractedCount - failedCount;
-
+                        
+                        // Determine season status
+                        var seasonStatusIcon = 'pending';
+                        var seasonStatusText = 'Pending';
+                        var seasonStatusColor = '#fbbf24';
+                        
+                        if (failedCount > 0) {
+                            seasonStatusIcon = 'error';
+                            seasonStatusText = 'Failed';
+                            seasonStatusColor = '#ef4444';
+                        } else if (pendingCount === 0 && extractedCount === episodes.length) {
+                            seasonStatusIcon = 'check_circle';
+                            seasonStatusText = 'Extracted';
+                            seasonStatusColor = '#4ade80';
+                        } else {
+                            seasonStatusIcon = 'pending';
+                            seasonStatusText = 'Pending';
+                            seasonStatusColor = '#fbbf24';
+                        }
+                        
                         // Season header row (level 2)
                         var seasonRow = document.createElement('tr');
                         seasonRow.className = 'season-header';
@@ -886,18 +928,19 @@
                         seasonRow.style.fontWeight = 'bold';
                         seasonRow.style.display = isSeriesCollapsed ? 'none' : '';
                         seasonRow.setAttribute('data-parent-series', seriesCollapsedId);
-
+                        
                         var seasonId = 'season-' + seriesId + '-' + seasonNumber;
                         var isSeasonCollapsed = localStorage.getItem(seasonId) === 'collapsed';
-
+                        
                         var seasonExpandIcon = isSeasonCollapsed ? 'chevron_right' : 'expand_more';
+                        var seasonStatusHtml = '<span class="material-icons" style="color:' + seasonStatusColor + ';vertical-align:middle;font-size:1em;margin-left:0.5em;">' + seasonStatusIcon + '</span><span style="color:' + seasonStatusColor + ';margin-left:0.3em;font-weight:normal;font-size:0.9em;">' + seasonStatusText + '</span>';
                         var seasonStatsHtml = '<span style="font-weight: normal; font-size: 0.9em; opacity: 0.8;"> (' + episodes.length + ' episodes: ' + extractedCount + ' extracted, ' + pendingCount + ' pending' + (failedCount > 0 ? ', ' + failedCount + ' failed' : '') + ')</span>';
-
-                        seasonRow.innerHTML = '<td colspan="5"><span style="padding-left: 1.5em;"><span class="material-icons" style="vertical-align: middle; font-size: 1.2em;">' + seasonExpandIcon + '</span> ' +
-                            seasonName + seasonStatsHtml + '</span></td>';
+                        
+                        seasonRow.innerHTML = '<td colspan="5"><span style="padding-left: 1.5em;"><span class="material-icons" style="vertical-align: middle; font-size: 1.2em;">' + seasonExpandIcon + '</span> ' + 
+                            seasonName + seasonStatusHtml + seasonStatsHtml + '</span></td>';
                         seasonRow.setAttribute('data-season-id', seasonId);
                         seasonRow.setAttribute('data-collapsed', isSeasonCollapsed ? 'true' : 'false');
-
+                        
                         tbody.appendChild(seasonRow);
 
                         // Episode rows (level 3)
