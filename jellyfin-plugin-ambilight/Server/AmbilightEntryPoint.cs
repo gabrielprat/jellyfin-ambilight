@@ -77,6 +77,7 @@ public class AmbilightEntryPoint : IHostedService
         // Subscribe to library scan events instead of polling
         _libraryManager.ItemAdded += OnItemAdded;
         _libraryManager.ItemUpdated += OnItemUpdated;
+        _libraryManager.ItemRemoved += OnItemRemoved;
 
         _logger.LogInformation("[Ambilight] Subscribed to library events");
 
@@ -96,6 +97,7 @@ public class AmbilightEntryPoint : IHostedService
         
         _libraryManager.ItemAdded -= OnItemAdded;
         _libraryManager.ItemUpdated -= OnItemUpdated;
+        _libraryManager.ItemRemoved -= OnItemRemoved;
 
         _cts?.Dispose();
 
@@ -192,6 +194,49 @@ public class AmbilightEntryPoint : IHostedService
     {
         // Could handle updated items here if needed
         // For now, we'll only extract new items
+    }
+
+    private void OnItemRemoved(object? sender, ItemChangeEventArgs e)
+    {
+        if (_storage == null || e.Item == null) return;
+        
+        // Only process movies and episodes
+        if (e.Item is not MediaBrowser.Controller.Entities.Movies.Movie && 
+            e.Item is not MediaBrowser.Controller.Entities.TV.Episode) return;
+
+        var itemIdStr = e.Item.Id.ToString("N");
+        var itemName = e.Item.Name ?? "Unknown";
+        
+        try
+        {
+            // Check if binary file exists
+            var binPath = _storage.GetBinaryPath(itemIdStr);
+            if (File.Exists(binPath))
+            {
+                File.Delete(binPath);
+                _logger.LogInformation("[Ambilight] Deleted binary file for removed item: {ItemName} ({Path})", itemName, binPath);
+            }
+            else
+            {
+                if (_config.Debug)
+                {
+                    _logger.LogDebug("[Ambilight] No binary file found for removed item: {ItemName}", itemName);
+                }
+            }
+            
+            // Clean up metadata (optional - keeps database smaller)
+            var ambiItem = _storage.GetItem(itemIdStr);
+            if (ambiItem != null)
+            {
+                // Mark as deleted rather than removing entirely (preserves history if needed)
+                // Or you could delete: _storage.DeleteItem(itemIdStr);
+                _logger.LogInformation("[Ambilight] Item removed from library: {ItemName}", itemName);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[Ambilight] Error cleaning up binary for removed item: {ItemName}", itemName);
+        }
     }
 
     private void OnPlaybackStart(object? sender, PlaybackProgressEventArgs e)

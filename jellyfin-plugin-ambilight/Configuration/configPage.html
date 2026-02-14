@@ -8,7 +8,7 @@
     <div id="AmbilightConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-select,emby-checkbox">
         <div data-role="content">
             <div class="content-primary">
-                
+
                 <!-- Tab Navigation -->
                 <div class="verticalSection">
                     <div class="sectionTitleContainer flex align-items-center">
@@ -26,7 +26,7 @@
                 <div id="settingsTab">
                 <form id="AmbilightConfigForm">
                     <h2 class="sectionTitle">Extraction</h2>
-                    
+
                     <div class="checkboxContainer checkboxContainer-withDescription">
                         <label class="emby-checkbox-label">
                             <input id="ExtractViewed" type="checkbox" is="emby-checkbox" />
@@ -340,16 +340,16 @@
                         document.querySelector('#AmbilightDataFolder').value = config.AmbilightDataFolder || '/data/ambilight';
                         document.querySelector('#AmbilightSmoothSeconds').value = (config.AmbilightSmoothSeconds != null ? config.AmbilightSmoothSeconds : 0.12);
                         document.querySelector('#Debug').checked = config.Debug === true;
-                        
+
                         document.querySelector('#DefaultWledHost').value = config.DefaultWledHost;
                         document.querySelector('#DefaultWledUdpPort').value = config.DefaultWledUdpPort;
-                        
+
                         document.querySelector('#AmbilightTopLedCount').value = config.AmbilightTopLedCount;
                         document.querySelector('#AmbilightBottomLedCount').value = config.AmbilightBottomLedCount;
                         document.querySelector('#AmbilightLeftLedCount').value = config.AmbilightLeftLedCount;
                         document.querySelector('#AmbilightRightLedCount').value = config.AmbilightRightLedCount;
                         document.querySelector('#AmbilightInputPosition').value = config.AmbilightInputPosition;
-                        
+
                         document.querySelector('#AmbilightRgbw').checked = config.AmbilightRgbw;
                         document.querySelector('#AmbilightGamma').value = config.AmbilightGamma;
                         document.querySelector('#AmbilightSaturation').value = config.AmbilightSaturation;
@@ -384,16 +384,16 @@
                     config.AmbilightDataFolder = document.querySelector('#AmbilightDataFolder').value || '/data/ambilight';
                     config.AmbilightSmoothSeconds = parseFloat(document.querySelector('#AmbilightSmoothSeconds').value || '0.12');
                     config.Debug = document.querySelector('#Debug').checked === true;
-                    
+
                     config.DefaultWledHost = document.querySelector('#DefaultWledHost').value;
                     config.DefaultWledUdpPort = document.querySelector('#DefaultWledUdpPort').value;
-                    
+
                     config.AmbilightTopLedCount = document.querySelector('#AmbilightTopLedCount').value;
                     config.AmbilightBottomLedCount = document.querySelector('#AmbilightBottomLedCount').value;
                     config.AmbilightLeftLedCount = document.querySelector('#AmbilightLeftLedCount').value;
                     config.AmbilightRightLedCount = document.querySelector('#AmbilightRightLedCount').value;
                     config.AmbilightInputPosition = document.querySelector('#AmbilightInputPosition').value;
-                    
+
                     config.AmbilightRgbw = document.querySelector('#AmbilightRgbw').checked;
                     config.AmbilightGamma = document.querySelector('#AmbilightGamma').value;
                     config.AmbilightSaturation = document.querySelector('#AmbilightSaturation').value;
@@ -432,7 +432,7 @@
                         }
                     }
                     config.AllowedDeviceIds = allowed;
-                    
+
                     ApiClient.updatePluginConfiguration(AmbilightConfig.pluginUniqueId, config).then(function (result) {
                         Dashboard.processPluginConfigurationUpdateResult(result);
                     });
@@ -649,24 +649,24 @@
                 console.log('[Ambilight] loadLibrary() called');
                 try {
                     Dashboard.showLoadingMsg();
-                    
+
                     // Get excluded libraries from config
                     var cfg = AmbilightConfig.currentConfig || {};
                     var excludedLibs = cfg.ExcludedLibraryIds || [];
                     console.log('[Ambilight] Excluded library IDs:', excludedLibs);
-                    
+
                     // Normalize function for comparison
                     function normalizeId(id) {
                         return (id || '').toLowerCase().replace(/-/g, '');
                     }
-                    
+
                     var normalizedExcluded = excludedLibs.map(normalizeId);
-                    
+
                     // Get all libraries first
                     var libraries = await ApiClient.getUserViews(ApiClient.getCurrentUserId());
                     var allLibraries = (libraries && libraries.Items) || [];
                     console.log('[Ambilight] All libraries:', allLibraries.map(l => ({ Id: l.Id, Name: l.Name })));
-                    
+
                     // Filter to only allowed libraries (video libraries, not excluded)
                     var allowedLibraries = allLibraries.filter(function(lib) {
                         var libId = normalizeId(lib.Id);
@@ -674,9 +674,9 @@
                         console.log('[Ambilight] Library:', lib.Name, 'ID:', lib.Id, 'Excluded:', isExcluded);
                         return !isExcluded && (lib.CollectionType === 'movies' || lib.CollectionType === 'tvshows');
                     });
-                    
+
                     console.log('[Ambilight] Allowed libraries:', allowedLibraries.map(l => ({ Id: l.Id, Name: l.Name })));
-                    
+
                     // Fetch items from each allowed library
                     allVideos = [];
                     for (var i = 0; i < allowedLibraries.length; i++) {
@@ -689,13 +689,13 @@
                             SortBy: 'SortName',
                             SortOrder: 'Ascending'
                         };
-                        
+
                         const result = await ApiClient.getItems(ApiClient.getCurrentUserId(), query);
                         var items = result.Items || [];
                         console.log('[Ambilight] Loaded', items.length, 'items from library:', lib.Name);
                         allVideos = allVideos.concat(items);
                     }
-                    
+
                     console.log('[Ambilight] Total videos loaded:', allVideos.length);
 
                     const statusPromises = allVideos.map(async (video) => {
@@ -715,7 +715,7 @@
                     });
 
                     await Promise.all(statusPromises);
-                    
+
                     console.log('[Ambilight] All videos with status loaded:', allVideos.length);
 
                     // Sort by DateCreated, newest first
@@ -775,7 +775,7 @@
                     var type = video.Type || '';
                     if (currentTypeFilter === 'series' && type !== 'Episode') return false;
                     if (currentTypeFilter === 'movies' && type === 'Episode') return false;
-                    
+
                     // Filter by search text
                     if (currentFilter) {
                         var searchLower = currentFilter.toLowerCase();
@@ -785,44 +785,44 @@
                             return false;
                         }
                     }
-                    
+
                     // Filter by status
                     if (currentStatusFilter !== 'all') {
                         var status = video.ambilightStatus;
                         var hasExtracted = !!(status && status.HasBinary);
                         var hasFailed = !!(status && status.error);
                         var isPending = !hasExtracted && !hasFailed;
-                        
+
                         if (currentStatusFilter === 'extracted' && !hasExtracted) return false;
                         if (currentStatusFilter === 'failed' && !hasFailed) return false;
                         if (currentStatusFilter === 'pending' && !isPending) return false;
                     }
-                    
+
                     return true;
                 });
 
                 // Group episodes by series and season (3-level hierarchy: Series → Season → Episodes)
                 var groupedData = {};
                 var moviesAndOther = [];
-                
+
                 filteredVideos.forEach(function(video) {
                     var type = video.Type || '';
                     if (type === 'Episode') {
                         var seriesName = video.SeriesName || 'Unknown Series';
                         var seriesId = video.SeriesId || 'unknown';
                         var seasonNumber = video.ParentIndexNumber != null ? video.ParentIndexNumber : 0;
-                        
+
                         if (!groupedData[seriesId]) {
                             groupedData[seriesId] = {
                                 name: seriesName,
                                 seasons: {}
                             };
                         }
-                        
+
                         if (!groupedData[seriesId].seasons[seasonNumber]) {
                             groupedData[seriesId].seasons[seasonNumber] = [];
                         }
-                        
+
                         groupedData[seriesId].seasons[seasonNumber].push(video);
                     } else {
                         moviesAndOther.push(video);
@@ -835,7 +835,7 @@
                 }).forEach(function(seriesId) {
                     var series = groupedData[seriesId];
                     var seasonKeys = Object.keys(series.seasons).sort(function(a, b) { return parseInt(a) - parseInt(b); });
-                    
+
                     // Calculate series-level stats (all episodes across all seasons)
                     var allEpisodes = [];
                     seasonKeys.forEach(function(seasonNum) {
@@ -844,7 +844,7 @@
                     var seriesExtractedCount = allEpisodes.filter(function(e) { return e.ambilightStatus?.HasBinary; }).length;
                     var seriesFailedCount = allEpisodes.filter(function(e) { return e.ambilightStatus?.error; }).length;
                     var seriesPendingCount = allEpisodes.length - seriesExtractedCount - seriesFailedCount;
-                    
+
                     // Series header row (level 1)
                     var seriesRow = document.createElement('tr');
                     seriesRow.className = 'series-header';
@@ -852,32 +852,32 @@
                     seriesRow.style.cursor = 'pointer';
                     seriesRow.style.fontWeight = 'bold';
                     seriesRow.style.fontSize = '1.05em';
-                    
+
                     var seriesCollapsedId = 'series-' + seriesId;
                     // Default to collapsed if not set in localStorage
                     var storedState = localStorage.getItem(seriesCollapsedId);
                     var isSeriesCollapsed = storedState === null ? true : storedState === 'collapsed';
-                    
+
                     var seriesExpandIcon = isSeriesCollapsed ? 'chevron_right' : 'expand_more';
                     var seriesStatsHtml = '<span style="font-weight: normal; font-size: 0.9em; opacity: 0.8;"> (' + seasonKeys.length + ' seasons, ' + allEpisodes.length + ' episodes: ' + seriesExtractedCount + ' extracted, ' + seriesPendingCount + ' pending' + (seriesFailedCount > 0 ? ', ' + seriesFailedCount + ' failed' : '') + ')</span>';
-                    
-                    seriesRow.innerHTML = '<td colspan="5"><span class="material-icons" style="vertical-align: middle; font-size: 1.2em;">' + seriesExpandIcon + '</span> ' + 
+
+                    seriesRow.innerHTML = '<td colspan="5"><span class="material-icons" style="vertical-align: middle; font-size: 1.2em;">' + seriesExpandIcon + '</span> ' +
                         escapeHtml(series.name) + seriesStatsHtml + '</td>';
                     seriesRow.setAttribute('data-series-id', seriesCollapsedId);
                     seriesRow.setAttribute('data-collapsed', isSeriesCollapsed ? 'true' : 'false');
-                    
+
                     tbody.appendChild(seriesRow);
-                    
+
                     // Season header rows (level 2) and episode rows (level 3)
                     seasonKeys.forEach(function(seasonNumber) {
                         var episodes = series.seasons[seasonNumber];
                         var seasonName = 'Season ' + seasonNumber;
-                        
+
                         // Calculate season stats
                         var extractedCount = episodes.filter(function(e) { return e.ambilightStatus?.HasBinary; }).length;
                         var failedCount = episodes.filter(function(e) { return e.ambilightStatus?.error; }).length;
                         var pendingCount = episodes.length - extractedCount - failedCount;
-                        
+
                         // Season header row (level 2)
                         var seasonRow = document.createElement('tr');
                         seasonRow.className = 'season-header';
@@ -886,20 +886,20 @@
                         seasonRow.style.fontWeight = 'bold';
                         seasonRow.style.display = isSeriesCollapsed ? 'none' : '';
                         seasonRow.setAttribute('data-parent-series', seriesCollapsedId);
-                        
+
                         var seasonId = 'season-' + seriesId + '-' + seasonNumber;
                         var isSeasonCollapsed = localStorage.getItem(seasonId) === 'collapsed';
-                        
+
                         var seasonExpandIcon = isSeasonCollapsed ? 'chevron_right' : 'expand_more';
                         var seasonStatsHtml = '<span style="font-weight: normal; font-size: 0.9em; opacity: 0.8;"> (' + episodes.length + ' episodes: ' + extractedCount + ' extracted, ' + pendingCount + ' pending' + (failedCount > 0 ? ', ' + failedCount + ' failed' : '') + ')</span>';
-                        
-                        seasonRow.innerHTML = '<td colspan="5"><span style="padding-left: 1.5em;"><span class="material-icons" style="vertical-align: middle; font-size: 1.2em;">' + seasonExpandIcon + '</span> ' + 
+
+                        seasonRow.innerHTML = '<td colspan="5"><span style="padding-left: 1.5em;"><span class="material-icons" style="vertical-align: middle; font-size: 1.2em;">' + seasonExpandIcon + '</span> ' +
                             seasonName + seasonStatsHtml + '</span></td>';
                         seasonRow.setAttribute('data-season-id', seasonId);
                         seasonRow.setAttribute('data-collapsed', isSeasonCollapsed ? 'true' : 'false');
-                        
+
                         tbody.appendChild(seasonRow);
-                        
+
                         // Episode rows (level 3)
                         episodes.forEach(function(video) {
                             var row = createVideoRow(video, true);
@@ -924,11 +924,11 @@
                         var seriesId = this.getAttribute('data-series-id');
                         var isCollapsed = this.getAttribute('data-collapsed') === 'true';
                         var newCollapsed = !isCollapsed;
-                        
+
                         // Toggle icon
                         var icon = this.querySelector('.material-icons');
                         icon.textContent = newCollapsed ? 'chevron_right' : 'expand_more';
-                        
+
                         // Toggle season headers and episode rows
                         document.querySelectorAll('[data-parent-series="' + seriesId + '"]').forEach(function(row) {
                             if (row.classList.contains('season-header')) {
@@ -946,7 +946,7 @@
                                 }
                             }
                         });
-                        
+
                         // Save state
                         this.setAttribute('data-collapsed', newCollapsed ? 'true' : 'false');
                         if (newCollapsed) {
@@ -963,16 +963,16 @@
                         var seasonId = this.getAttribute('data-season-id');
                         var isCollapsed = this.getAttribute('data-collapsed') === 'true';
                         var newCollapsed = !isCollapsed;
-                        
+
                         // Toggle icon
                         var icon = this.querySelector('.material-icons');
                         icon.textContent = newCollapsed ? 'chevron_right' : 'expand_more';
-                        
+
                         // Toggle episode rows
                         document.querySelectorAll('[data-parent-season="' + seasonId + '"]').forEach(function(row) {
                             row.style.display = newCollapsed ? 'none' : '';
                         });
-                        
+
                         // Save state
                         this.setAttribute('data-collapsed', newCollapsed ? 'true' : 'false');
                         if (newCollapsed) {
@@ -1072,12 +1072,12 @@
                     var btnLabel = isExtracted ? 'Delete bin' : 'Extract';
                     btnHtml = '<button data-mode="' + btnMode + '" data-id="' + escapeHtml(videoId) + '" data-name="' + escapeHtml(videoName) + '" is="emby-button" class="' + btnClass + '">' + btnLabel + '</button>';
                 }
-                
+
                 var titleCellHtml = escapeHtml(videoName);
                 if (metaText) {
                     titleCellHtml += '<div class="fieldDescription">' + escapeHtml(metaText) + '</div>';
                 }
-                
+
                 // Indent episode titles if grouped (level 3, so indent more)
                 if (isEpisode) {
                     titleCellHtml = '<span style="padding-left: 3em;">' + titleCellHtml + '</span>';
@@ -1091,7 +1091,7 @@
                         var now = new Date();
                         var diffMs = now - dateObj;
                         var diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-                        
+
                         if (diffDays === 0) {
                             addedDateText = 'Today';
                         } else if (diffDays === 1) {
@@ -1108,7 +1108,7 @@
                             var years = Math.floor(diffDays / 365);
                             addedDateText = years + (years === 1 ? ' year ago' : ' years ago');
                         }
-                        
+
                         // Also show exact date on hover
                         var exactDate = dateObj.toLocaleDateString();
                         addedDateText = '<span title="' + escapeHtml(exactDate) + '">' + addedDateText + '</span>';
@@ -1122,7 +1122,7 @@
                     '<td><span class="material-icons" style="color:' + statusColor + ';vertical-align:middle;font-size:1.2em;">' + statusIcon + '</span> ' + statusText + '</td>' +
                     '<td>' + sizeText + '</td>' +
                     '<td>' + btnHtml + '</td>';
-                
+
                 return row;
             }
 
@@ -1179,7 +1179,7 @@
 
             async function extractAllPending() {
                 const pending = allVideos.filter(function(v) { return !(v.ambilightStatus && (v.ambilightStatus.HasBinary || v.ambilightStatus.error)); });
-                
+
                 if (pending.length === 0) {
                     showToast('No pending videos to extract');
                     return;
