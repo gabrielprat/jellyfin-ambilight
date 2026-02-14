@@ -60,12 +60,11 @@ public class AmbilightEntryPoint : IHostedService
         var storageLogger = loggerFactory.CreateLogger<AmbilightStorageService>();
         var extractorLogger = loggerFactory.CreateLogger<AmbilightExtractorService>();
         var playbackLogger = loggerFactory.CreateLogger<AmbilightPlaybackService>();
-        var resolverLogger = loggerFactory.CreateLogger<EmbeddedBinariesResolver>();
+        var extractorCoreLogger = loggerFactory.CreateLogger<AmbilightInProcessExtractor>();
 
         _storage = new AmbilightStorageService(storageLogger, _config);
-        var resolver = new EmbeddedBinariesResolver(_appPaths, _config, resolverLogger);
-        var extractorPath = resolver.GetExtractorPath();
-        _extractor = new AmbilightExtractorService(extractorLogger, _libraryManager, _storage, _config, extractorPath);
+        var extractorCore = new AmbilightInProcessExtractor(extractorCoreLogger, _config);
+        _extractor = new AmbilightExtractorService(extractorLogger, _libraryManager, _storage, _config, extractorCore);
         _playback = new AmbilightPlaybackService(playbackLogger, _sessionManager, _libraryManager, _storage, _config);
 
         _cts = new CancellationTokenSource();

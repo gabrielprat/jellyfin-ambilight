@@ -185,14 +185,73 @@ public class AmbilightPlaybackService
         }
 
         var deviceId = session.DeviceId;
-        if (string.IsNullOrEmpty(deviceId))
+        var deviceName = session.DeviceName ?? string.Empty;
+        var clientName = session.Client ?? string.Empty;
+
+        if (_config.Debug)
         {
-            // Missing DeviceId, treat as allowed to avoid surprising breakage
+            var list = string.Join(", ", allowed);
+            _logger.LogInformation(
+                "[Ambilight] Device gating: session DeviceId={DeviceId}, Name={DeviceName}, Client={Client}; Allowed={Allowed}",
+                deviceId,
+                deviceName,
+                clientName,
+                list);
+        }
+
+        // If Jellyfin doesn't provide a DeviceId, don't unexpectedly block playback.
+        if (string.IsNullOrEmpty(deviceId) && string.IsNullOrEmpty(deviceName) && string.IsNullOrEmpty(clientName))
+        {
             return true;
         }
 
-        // Match against known device Ids from /Devices (case-insensitive).
-        return allowed.Any(id => string.Equals(id, deviceId, StringComparison.OrdinalIgnoreCase));
+        // We accept a match on any of the common identifiers so that older configs
+        // (that may have stored names or clients) keep working.
+        bool Match(string a, string b) =>
+            !string.IsNullOrEmpty(a) &&
+            !string.IsNullOrEmpty(b) &&
+            string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+
+        // For DeviceId, strip session timestamps before comparing
+        // Jellyfin Web client DeviceIds are base64(UserAgent|timestamp), so we need fuzzy matching
+        string StripDeviceIdTimestamp(string deviceId)
+        {
+            if (string.IsNullOrEmpty(deviceId))
+            {
+                return deviceId;
+            }
+
+            // Try to decode if it looks like base64 and strip the timestamp after the pipe
+            try
+            {
+                var decoded = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(deviceId));
+                var pipeIndex = decoded.LastIndexOf('|');
+                if (pipeIndex > 0 && decoded.Length - pipeIndex <= 20) // timestamp is typically 13-20 chars
+                {
+                    var withoutTimestamp = decoded.Substring(0, pipeIndex);
+                    return Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(withoutTimestamp));
+                }
+            }
+            catch
+            {
+                // Not base64 or decode failed, return as-is
+            }
+
+            return deviceId;
+        }
+
+        var normalizedDeviceId = StripDeviceIdTimestamp(deviceId);
+
+        foreach (var entry in allowed)
+        {
+            var normalizedEntry = StripDeviceIdTimestamp(entry);
+            if (Match(normalizedEntry, normalizedDeviceId) || Match(entry, deviceName) || Match(entry, clientName))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private (string host, int port)? ResolveWledTarget(SessionInfo session)

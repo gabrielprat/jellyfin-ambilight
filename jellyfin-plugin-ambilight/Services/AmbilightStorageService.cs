@@ -49,6 +49,22 @@ public class AmbilightStorageService
         try
         {
             var json = File.ReadAllText(metadataPath);
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                // Zero-byte or whitespace file – treat as corrupt and delete so we can recreate cleanly.
+                try
+                {
+                    File.Delete(metadataPath);
+                }
+                catch
+                {
+                    // Ignore delete failures; we'll just skip this item.
+                }
+
+                _logger.LogWarning("Ambilight metadata file for item {ItemId} was empty. Deleted corrupt file.", itemId);
+                return null;
+            }
+
             return JsonSerializer.Deserialize<AmbilightItem>(json);
         }
         catch (Exception ex)

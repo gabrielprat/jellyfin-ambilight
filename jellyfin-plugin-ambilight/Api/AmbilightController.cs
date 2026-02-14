@@ -203,6 +203,46 @@ public class AmbilightController : ControllerBase
             });
         }
     }
+
+    /// <summary>
+    /// Deletes the ambilight binary for a specific item so it can be re-extracted.
+    /// </summary>
+    /// <param name="itemId">The item ID.</param>
+    [HttpDelete("Binary/{itemId}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public ActionResult DeleteBinary([FromRoute, Required] string itemId)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(itemId) || !Guid.TryParse(itemId, out var guid))
+            {
+                return BadRequest(new { error = "Invalid item ID", itemId });
+            }
+
+            var config = Plugin.Instance?.Configuration;
+            var dataFolder = string.IsNullOrWhiteSpace(config?.AmbilightDataFolder) ? "/data/ambilight" : config!.AmbilightDataFolder.Trim();
+            var binPath = Path.Combine(dataFolder, guid.ToString("N") + ".bin");
+
+            if (System.IO.File.Exists(binPath))
+            {
+                System.IO.File.Delete(binPath);
+            }
+
+            // We intentionally do not touch metadata here; the extractor service will
+            // treat missing binaries as "needs extraction" on the next run.
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new
+            {
+                error = ex.Message,
+                type = ex.GetType().Name,
+                stackTrace = ex.StackTrace
+            });
+        }
+    }
 }
 
 public class AmbilightStatusResponse

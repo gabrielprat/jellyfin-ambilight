@@ -24,24 +24,20 @@ public class AmbilightExtractorService
     private readonly ILibraryManager _libraryManager;
     private readonly AmbilightStorageService _storage;
     private readonly PluginConfiguration _config;
-    private readonly string _extractorPath;
+    private readonly AmbilightInProcessExtractor _extractorCore;
 
     public AmbilightExtractorService(
         ILogger<AmbilightExtractorService> logger,
         ILibraryManager libraryManager,
         AmbilightStorageService storage,
         PluginConfiguration config,
-        string? extractorPathOverride = null)
+        AmbilightInProcessExtractor extractorCore)
     {
         _logger = logger;
         _libraryManager = libraryManager;
         _storage = storage;
         _config = config;
-        _extractorPath = !string.IsNullOrWhiteSpace(extractorPathOverride)
-            ? extractorPathOverride
-            : (string.IsNullOrWhiteSpace(config.RustExtractorPath)
-                ? "/usr/local/bin/ambilight-extractor"
-                : config.RustExtractorPath!);
+        _extractorCore = extractorCore;
     }
 
     /// <summary>
@@ -54,6 +50,7 @@ public class AmbilightExtractorService
         _logger.LogInformation("[Ambilight] Syncing library items from Jellyfin...");
 
         var excluded = _config.ExcludedLibraryIds ?? new List<string>();
+        var normalizedExcluded = excluded.Select(NormalizeLibraryId).ToHashSet();
 
         foreach (var item in _libraryManager.GetItemList(new InternalItemsQuery
                  {
@@ -61,19 +58,21 @@ public class AmbilightExtractorService
                      Recursive = true
                  }))
         {
-            // Skip items from excluded libraries (by parent library Id)
-            if (excluded.Count > 0 && item.ParentId != Guid.Empty)
-            {
-                var libId = item.ParentId.ToString("N");
-                if (excluded.Contains(libId))
-                {
-                    continue;
-                }
-            }
-
             if (item.Path is null)
             {
                 continue;
+            }
+
+            // Get the library ID by walking up the parent chain
+            var libraryId = GetLibraryId(item);
+
+            // Skip items from excluded libraries (normalize for comparison)
+            if (normalizedExcluded.Count > 0 && !string.IsNullOrEmpty(libraryId))
+            {
+                if (normalizedExcluded.Contains(NormalizeLibraryId(libraryId)))
+                {
+                    continue;
+                }
             }
 
             var itemIdStr = item.Id.ToString("N");
@@ -83,7 +82,7 @@ public class AmbilightExtractorService
                 ambiItem = new AmbilightItem
                 {
                     Id = itemIdStr,
-                    LibraryId = item.ParentId.ToString("N"),
+                    LibraryId = libraryId ?? item.ParentId.ToString("N"),
                     Name = item.Name ?? "Unknown",
                     Type = item.GetType().Name,
                     Kind = item.GetType().Name == "Episode" ? "Serie" : (item.GetType().Name == "Movie" ? "Movie" : "Video"),
@@ -112,6 +111,7 @@ public class AmbilightExtractorService
         var extractionMaxAgeDays = _config.ExtractionMaxAgeDays;
         var extractViewed = _config.ExtractViewed;
         var excluded = _config.ExcludedLibraryIds ?? new List<string>();
+        var normalizedExcluded = excluded.Select(NormalizeLibraryId).ToHashSet();
 
         var videoItems = _libraryManager.GetItemList(new InternalItemsQuery
         {
@@ -126,10 +126,13 @@ public class AmbilightExtractorService
                 continue;
             }
 
-            if (excluded.Count > 0 && jellyfinItem.ParentId != Guid.Empty)
+            // Get the library ID by walking up the parent chain
+            var libraryId = GetLibraryId(jellyfinItem);
+
+            // Skip items from excluded libraries (normalize for comparison)
+            if (normalizedExcluded.Count > 0 && !string.IsNullOrEmpty(libraryId))
             {
-                var libId = jellyfinItem.ParentId.ToString("N");
-                if (excluded.Contains(libId))
+                if (normalizedExcluded.Contains(NormalizeLibraryId(libraryId)))
                 {
                     continue;
                 }
@@ -190,7 +193,7 @@ public class AmbilightExtractorService
     }
 
     /// <summary>
-    /// Runs the Rust extractor for a single item.
+    /// Runs the in-process extractor for a single item.
     /// </summary>
     public async Task RunExtractorForItemAsync(AmbilightItem item, CancellationToken cancellationToken)
     {
@@ -203,57 +206,13 @@ public class AmbilightExtractorService
             Directory.CreateDirectory(binDir);
         }
 
-        if (!System.IO.File.Exists(_extractorPath))
-        {
-            var msg = $"Ambilight extractor binary not found at: {_extractorPath}. Install the binary or set RustExtractorPath in plugin settings.";
-            _logger.LogError("[Ambilight] {Msg}", msg);
-            item.ExtractionStatus = "failed";
-            item.ExtractionError = msg;
-            item.ExtractionAttempts += 1;
-            _storage.SaveOrUpdateItem(item);
-            return;
-        }
-
-        var videoDir = Path.GetDirectoryName(item.FilePath);
-        if (string.IsNullOrEmpty(videoDir)) videoDir = Path.GetTempPath();
-
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = _extractorPath,
-            WorkingDirectory = videoDir,
-            ArgumentList =
-            {
-                "--input", item.FilePath,
-                "--output", binPath
-            },
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
-        };
-
-        _logger.LogInformation("[Ambilight] Starting Rust extractor for {ItemName}", item.Name);
-
         try
         {
-            using var process = new Process { StartInfo = startInfo };
-            process.Start();
+            _logger.LogInformation("[Ambilight] Starting in-process extractor for {ItemName}", item.Name);
 
-            // Optional: read output for logging
-            _ = Task.Run(async () =>
-            {
-                while (!process.StandardError.EndOfStream)
-                {
-                    var line = await process.StandardError.ReadLineAsync().ConfigureAwait(false);
-                    if (!string.IsNullOrWhiteSpace(line))
-                    {
-                        _logger.LogDebug("[ambilight-extractor] {Line}", line);
-                    }
-                }
-            }, cancellationToken);
+            var ok = await _extractorCore.ExtractAsync(item.FilePath, binPath, cancellationToken).ConfigureAwait(false);
 
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-
-            if (process.ExitCode == 0 && File.Exists(binPath))
+            if (ok && File.Exists(binPath))
             {
                 item.ExtractionStatus = "completed";
                 item.ExtractionError = null;
@@ -262,8 +221,8 @@ public class AmbilightExtractorService
             else
             {
                 item.ExtractionStatus = "failed";
-                item.ExtractionError = $"ExitCode={process.ExitCode}";
-                _logger.LogWarning("[Ambilight] Extraction failed for {ItemName} (exit code {ExitCode})", item.Name, process.ExitCode);
+                item.ExtractionError = "Extractor returned failure";
+                _logger.LogWarning("[Ambilight] Extraction failed for {ItemName}", item.Name);
             }
         }
         catch (Exception ex)
@@ -277,6 +236,49 @@ public class AmbilightExtractorService
             item.ExtractionAttempts += 1;
             _storage.SaveOrUpdateItem(item);
         }
+    }
+
+    /// <summary>
+    /// Gets the library ID for an item by walking up the parent chain.
+    /// Returns the ID in "N" format (without dashes) for consistent comparison.
+    /// </summary>
+    private string? GetLibraryId(BaseItem item)
+    {
+        var current = item;
+        
+        // Walk up the parent chain until we find a CollectionFolder (library root)
+        while (current != null)
+        {
+            // Check if this is a library root (CollectionFolder)
+            // The type name check is a simple way to identify library folders
+            var typeName = current.GetType().Name;
+            if (typeName == "CollectionFolder" || typeName == "UserView")
+            {
+                return current.Id.ToString("N");
+            }
+
+            // Move to parent
+            if (current.ParentId != Guid.Empty)
+            {
+                current = _libraryManager.GetItemById(current.ParentId);
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        // Fallback: use ParentId if we couldn't find a library
+        return item.ParentId != Guid.Empty ? item.ParentId.ToString("N") : null;
+    }
+
+    /// <summary>
+    /// Normalizes a library ID for comparison by removing dashes and converting to lowercase.
+    /// Handles both "D" format (with dashes) and "N" format (without dashes).
+    /// </summary>
+    private static string NormalizeLibraryId(string id)
+    {
+        return id.Replace("-", string.Empty).ToLowerInvariant();
     }
 }
 

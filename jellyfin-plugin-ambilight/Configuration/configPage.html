@@ -260,7 +260,7 @@
                     <h2 class="sectionTitle">Extraction Manager</h2>
                     <p class="sectionSubTitle">Manage ambilight data extraction for your video library</p>
 
-                    <div style="display: flex; gap: 1em; margin-bottom: 1em; flex-wrap: wrap;">
+                    <div style="display: flex; gap: 1em; margin-bottom: 1em; flex-wrap: wrap; align-items: center;">
                         <button id="btnRefresh" is="emby-button" class="raised button-submit">
                             <span class="material-icons" style="vertical-align: middle;">refresh</span>
                             Refresh
@@ -269,6 +269,17 @@
                             <span class="material-icons" style="vertical-align: middle;">play_arrow</span>
                             Extract All Pending
                         </button>
+                        <select id="typeFilter" is="emby-select" class="emby-select-withcolor emby-select" style="min-width: 120px;">
+                            <option value="both">All Types</option>
+                            <option value="series">Series Only</option>
+                            <option value="movies">Movies Only</option>
+                        </select>
+                        <select id="statusFilter" is="emby-select" class="emby-select-withcolor emby-select" style="min-width: 120px;">
+                            <option value="all">All Status</option>
+                            <option value="extracted">Extracted</option>
+                            <option value="pending">Pending</option>
+                            <option value="failed">Failed</option>
+                        </select>
                         <input id="searchBox" type="text" is="emby-input" placeholder="Search videos..." style="flex: 1; min-width: 200px;">
                     </div>
 
@@ -296,6 +307,7 @@
                             <thead>
                                 <tr>
                                     <th>Title</th>
+                                    <th>Added Date</th>
                                     <th>Status</th>
                                     <th>Size</th>
                                     <th>Action</th>
@@ -311,13 +323,15 @@
         </div>
         <script type="text/javascript">
             var AmbilightConfig = {
-                pluginUniqueId: 'b3f6b4c7-0a3d-4bd4-a7e3-c8d5a0a1e3f0'
+                pluginUniqueId: 'b3f6b4c7-0a3d-4bd4-a7e3-c8d5a0a1e3f0',
+                currentConfig: null
             };
 
             document.querySelector('#AmbilightConfigPage')
                 .addEventListener('pageshow', function() {
                     Dashboard.showLoadingMsg();
                     ApiClient.getPluginConfiguration(AmbilightConfig.pluginUniqueId).then(function (config) {
+                        AmbilightConfig.currentConfig = config;
                         document.querySelector('#ExtractViewed').checked = config.ExtractViewed;
                         document.querySelector('#ExtractionPriority').value = config.ExtractionPriority;
                         document.querySelector('#ExtractionMaxAgeDays').value = config.ExtractionMaxAgeDays;
@@ -539,6 +553,9 @@
             // ===== MANAGER TAB LOGIC =====
             let allVideos = [];
             let currentFilter = '';
+            let currentStatusFilter = 'all';
+            let currentTypeFilter = 'both';
+            let extractingIds = {};
 
             function showToast(msg) {
                 if (typeof require === 'function') {
@@ -629,19 +646,57 @@
             });
 
             async function loadLibrary() {
+                console.log('[Ambilight] loadLibrary() called');
                 try {
                     Dashboard.showLoadingMsg();
                     
-                    const query = {
-                        IncludeItemTypes: 'Movie,Episode',
-                        Recursive: true,
-                        Fields: 'Path,DateCreated',
-                        SortBy: 'SortName',
-                        SortOrder: 'Ascending'
-                    };
-
-                    const result = await ApiClient.getItems(ApiClient.getCurrentUserId(), query);
-                    allVideos = result.Items || [];
+                    // Get excluded libraries from config
+                    var cfg = AmbilightConfig.currentConfig || {};
+                    var excludedLibs = cfg.ExcludedLibraryIds || [];
+                    console.log('[Ambilight] Excluded library IDs:', excludedLibs);
+                    
+                    // Normalize function for comparison
+                    function normalizeId(id) {
+                        return (id || '').toLowerCase().replace(/-/g, '');
+                    }
+                    
+                    var normalizedExcluded = excludedLibs.map(normalizeId);
+                    
+                    // Get all libraries first
+                    var libraries = await ApiClient.getUserViews(ApiClient.getCurrentUserId());
+                    var allLibraries = (libraries && libraries.Items) || [];
+                    console.log('[Ambilight] All libraries:', allLibraries.map(l => ({ Id: l.Id, Name: l.Name })));
+                    
+                    // Filter to only allowed libraries (video libraries, not excluded)
+                    var allowedLibraries = allLibraries.filter(function(lib) {
+                        var libId = normalizeId(lib.Id);
+                        var isExcluded = normalizedExcluded.indexOf(libId) !== -1;
+                        console.log('[Ambilight] Library:', lib.Name, 'ID:', lib.Id, 'Excluded:', isExcluded);
+                        return !isExcluded && (lib.CollectionType === 'movies' || lib.CollectionType === 'tvshows');
+                    });
+                    
+                    console.log('[Ambilight] Allowed libraries:', allowedLibraries.map(l => ({ Id: l.Id, Name: l.Name })));
+                    
+                    // Fetch items from each allowed library
+                    allVideos = [];
+                    for (var i = 0; i < allowedLibraries.length; i++) {
+                        var lib = allowedLibraries[i];
+                        const query = {
+                            ParentId: lib.Id,
+                            IncludeItemTypes: 'Movie,Episode',
+                            Recursive: true,
+                            Fields: 'Path,DateCreated,SeriesName,SeasonName,ParentIndexNumber,IndexNumber,Type,ParentId,SeriesId',
+                            SortBy: 'SortName',
+                            SortOrder: 'Ascending'
+                        };
+                        
+                        const result = await ApiClient.getItems(ApiClient.getCurrentUserId(), query);
+                        var items = result.Items || [];
+                        console.log('[Ambilight] Loaded', items.length, 'items from library:', lib.Name);
+                        allVideos = allVideos.concat(items);
+                    }
+                    
+                    console.log('[Ambilight] Total videos loaded:', allVideos.length);
 
                     const statusPromises = allVideos.map(async (video) => {
                         try {
@@ -660,6 +715,25 @@
                     });
 
                     await Promise.all(statusPromises);
+                    
+                    console.log('[Ambilight] All videos with status loaded:', allVideos.length);
+
+                    // Sort by DateCreated, newest first
+                    allVideos.sort(function(a, b) {
+                        var dateA = a.DateCreated ? new Date(a.DateCreated) : new Date(0);
+                        var dateB = b.DateCreated ? new Date(b.DateCreated) : new Date(0);
+                        return dateB - dateA; // Descending (newest first)
+                    });
+
+                    // Clear extracting flags for items that have finished (either extracted or failed)
+                    allVideos.forEach(function (video) {
+                        var status = video.ambilightStatus;
+                        if (status && (status.HasBinary || status.error)) {
+                            if (extractingIds[video.Id]) {
+                                delete extractingIds[video.Id];
+                            }
+                        }
+                    });
 
                     updateStatistics();
                     renderVideoList();
@@ -697,47 +771,359 @@
                 tbody.innerHTML = '';
 
                 const filteredVideos = allVideos.filter(function(video) {
-                    if (!currentFilter) return true;
-                    return (video.Name || '').toLowerCase().indexOf(currentFilter.toLowerCase()) !== -1;
+                    // Filter by type
+                    var type = video.Type || '';
+                    if (currentTypeFilter === 'series' && type !== 'Episode') return false;
+                    if (currentTypeFilter === 'movies' && type === 'Episode') return false;
+                    
+                    // Filter by search text
+                    if (currentFilter) {
+                        var searchLower = currentFilter.toLowerCase();
+                        var matchesName = (video.Name || '').toLowerCase().indexOf(searchLower) !== -1;
+                        var matchesSeries = (video.SeriesName || '').toLowerCase().indexOf(searchLower) !== -1;
+                        if (!matchesName && !matchesSeries) {
+                            return false;
+                        }
+                    }
+                    
+                    // Filter by status
+                    if (currentStatusFilter !== 'all') {
+                        var status = video.ambilightStatus;
+                        var hasExtracted = !!(status && status.HasBinary);
+                        var hasFailed = !!(status && status.error);
+                        var isPending = !hasExtracted && !hasFailed;
+                        
+                        if (currentStatusFilter === 'extracted' && !hasExtracted) return false;
+                        if (currentStatusFilter === 'failed' && !hasFailed) return false;
+                        if (currentStatusFilter === 'pending' && !isPending) return false;
+                    }
+                    
+                    return true;
                 });
 
+                // Group episodes by series and season (3-level hierarchy: Series → Season → Episodes)
+                var groupedData = {};
+                var moviesAndOther = [];
+                
                 filteredVideos.forEach(function(video) {
-                    const row = document.createElement('tr');
-                    const status = video.ambilightStatus;
-                    var statusIcon = 'pending';
-                    var statusText = 'Pending';
-                    var statusColor = '#fbbf24';
-                    if (status && status.error) {
-                        statusIcon = 'error';
-                        statusText = 'Failed';
-                        statusColor = '#ef4444';
-                    } else if (status && status.HasBinary) {
-                        statusIcon = 'check_circle';
-                        statusText = 'Extracted';
-                        statusColor = '#4ade80';
+                    var type = video.Type || '';
+                    if (type === 'Episode') {
+                        var seriesName = video.SeriesName || 'Unknown Series';
+                        var seriesId = video.SeriesId || 'unknown';
+                        var seasonNumber = video.ParentIndexNumber != null ? video.ParentIndexNumber : 0;
+                        
+                        if (!groupedData[seriesId]) {
+                            groupedData[seriesId] = {
+                                name: seriesName,
+                                seasons: {}
+                            };
+                        }
+                        
+                        if (!groupedData[seriesId].seasons[seasonNumber]) {
+                            groupedData[seriesId].seasons[seasonNumber] = [];
+                        }
+                        
+                        groupedData[seriesId].seasons[seasonNumber].push(video);
+                    } else {
+                        moviesAndOther.push(video);
                     }
-                    var sizeText = '-';
-                    if (status && status.HasBinary && status.BinarySize != null) {
-                        sizeText = (status.BinarySize / 1024 / 1024).toFixed(2) + ' MB';
-                    }
-                    var videoName = video.Name || '';
-                    var videoId = video.Id || '';
-                    var btnDisabled = (status && status.HasBinary) ? ' disabled' : '';
-                    var btnLabel = (status && status.HasBinary) ? 'Extracted' : 'Extract';
-                    row.innerHTML = '<td>' + escapeHtml(videoName) + '</td>' +
-                        '<td><span class="material-icons" style="color:' + statusColor + ';vertical-align:middle;font-size:1.2em;">' + statusIcon + '</span> ' + statusText + '</td>' +
-                        '<td>' + sizeText + '</td>' +
-                        '<td><button class="btnExtractVideo" data-id="' + escapeHtml(videoId) + '" data-name="' + escapeHtml(videoName) + '"' + btnDisabled + ' is="emby-button" class="raised button-submit">' + btnLabel + '</button></td>';
+                });
+
+                // Render grouped series (3-level: Series → Season → Episodes)
+                Object.keys(groupedData).sort(function(a, b) {
+                    return groupedData[a].name.localeCompare(groupedData[b].name);
+                }).forEach(function(seriesId) {
+                    var series = groupedData[seriesId];
+                    var seasonKeys = Object.keys(series.seasons).sort(function(a, b) { return parseInt(a) - parseInt(b); });
+                    
+                    // Calculate series-level stats (all episodes across all seasons)
+                    var allEpisodes = [];
+                    seasonKeys.forEach(function(seasonNum) {
+                        allEpisodes = allEpisodes.concat(series.seasons[seasonNum]);
+                    });
+                    var seriesExtractedCount = allEpisodes.filter(function(e) { return e.ambilightStatus?.HasBinary; }).length;
+                    var seriesFailedCount = allEpisodes.filter(function(e) { return e.ambilightStatus?.error; }).length;
+                    var seriesPendingCount = allEpisodes.length - seriesExtractedCount - seriesFailedCount;
+                    
+                    // Series header row (level 1)
+                    var seriesRow = document.createElement('tr');
+                    seriesRow.className = 'series-header';
+                    seriesRow.style.backgroundColor = 'rgba(255, 255, 255, 0.08)';
+                    seriesRow.style.cursor = 'pointer';
+                    seriesRow.style.fontWeight = 'bold';
+                    seriesRow.style.fontSize = '1.05em';
+                    
+                    var seriesCollapsedId = 'series-' + seriesId;
+                    // Default to collapsed if not set in localStorage
+                    var storedState = localStorage.getItem(seriesCollapsedId);
+                    var isSeriesCollapsed = storedState === null ? true : storedState === 'collapsed';
+                    
+                    var seriesExpandIcon = isSeriesCollapsed ? 'chevron_right' : 'expand_more';
+                    var seriesStatsHtml = '<span style="font-weight: normal; font-size: 0.9em; opacity: 0.8;"> (' + seasonKeys.length + ' seasons, ' + allEpisodes.length + ' episodes: ' + seriesExtractedCount + ' extracted, ' + seriesPendingCount + ' pending' + (seriesFailedCount > 0 ? ', ' + seriesFailedCount + ' failed' : '') + ')</span>';
+                    
+                    seriesRow.innerHTML = '<td colspan="5"><span class="material-icons" style="vertical-align: middle; font-size: 1.2em;">' + seriesExpandIcon + '</span> ' + 
+                        escapeHtml(series.name) + seriesStatsHtml + '</td>';
+                    seriesRow.setAttribute('data-series-id', seriesCollapsedId);
+                    seriesRow.setAttribute('data-collapsed', isSeriesCollapsed ? 'true' : 'false');
+                    
+                    tbody.appendChild(seriesRow);
+                    
+                    // Season header rows (level 2) and episode rows (level 3)
+                    seasonKeys.forEach(function(seasonNumber) {
+                        var episodes = series.seasons[seasonNumber];
+                        var seasonName = 'Season ' + seasonNumber;
+                        
+                        // Calculate season stats
+                        var extractedCount = episodes.filter(function(e) { return e.ambilightStatus?.HasBinary; }).length;
+                        var failedCount = episodes.filter(function(e) { return e.ambilightStatus?.error; }).length;
+                        var pendingCount = episodes.length - extractedCount - failedCount;
+                        
+                        // Season header row (level 2)
+                        var seasonRow = document.createElement('tr');
+                        seasonRow.className = 'season-header';
+                        seasonRow.style.backgroundColor = 'rgba(255, 255, 255, 0.04)';
+                        seasonRow.style.cursor = 'pointer';
+                        seasonRow.style.fontWeight = 'bold';
+                        seasonRow.style.display = isSeriesCollapsed ? 'none' : '';
+                        seasonRow.setAttribute('data-parent-series', seriesCollapsedId);
+                        
+                        var seasonId = 'season-' + seriesId + '-' + seasonNumber;
+                        var isSeasonCollapsed = localStorage.getItem(seasonId) === 'collapsed';
+                        
+                        var seasonExpandIcon = isSeasonCollapsed ? 'chevron_right' : 'expand_more';
+                        var seasonStatsHtml = '<span style="font-weight: normal; font-size: 0.9em; opacity: 0.8;"> (' + episodes.length + ' episodes: ' + extractedCount + ' extracted, ' + pendingCount + ' pending' + (failedCount > 0 ? ', ' + failedCount + ' failed' : '') + ')</span>';
+                        
+                        seasonRow.innerHTML = '<td colspan="5"><span style="padding-left: 1.5em;"><span class="material-icons" style="vertical-align: middle; font-size: 1.2em;">' + seasonExpandIcon + '</span> ' + 
+                            seasonName + seasonStatsHtml + '</span></td>';
+                        seasonRow.setAttribute('data-season-id', seasonId);
+                        seasonRow.setAttribute('data-collapsed', isSeasonCollapsed ? 'true' : 'false');
+                        
+                        tbody.appendChild(seasonRow);
+                        
+                        // Episode rows (level 3)
+                        episodes.forEach(function(video) {
+                            var row = createVideoRow(video, true);
+                            row.className = 'episode-row';
+                            row.style.display = (isSeriesCollapsed || isSeasonCollapsed) ? 'none' : '';
+                            row.setAttribute('data-parent-season', seasonId);
+                            row.setAttribute('data-parent-series', seriesCollapsedId);
+                            tbody.appendChild(row);
+                        });
+                    });
+                });
+
+                // Render movies and other content
+                moviesAndOther.forEach(function(video) {
+                    var row = createVideoRow(video, false);
                     tbody.appendChild(row);
                 });
 
+                // Add click handlers for series headers (level 1)
+                document.querySelectorAll('.series-header').forEach(function(header) {
+                    header.addEventListener('click', function() {
+                        var seriesId = this.getAttribute('data-series-id');
+                        var isCollapsed = this.getAttribute('data-collapsed') === 'true';
+                        var newCollapsed = !isCollapsed;
+                        
+                        // Toggle icon
+                        var icon = this.querySelector('.material-icons');
+                        icon.textContent = newCollapsed ? 'chevron_right' : 'expand_more';
+                        
+                        // Toggle season headers and episode rows
+                        document.querySelectorAll('[data-parent-series="' + seriesId + '"]').forEach(function(row) {
+                            if (row.classList.contains('season-header')) {
+                                // Show/hide season header
+                                row.style.display = newCollapsed ? 'none' : '';
+                            } else if (row.classList.contains('episode-row')) {
+                                // Episode rows: only show if series is expanded AND season is expanded
+                                if (newCollapsed) {
+                                    row.style.display = 'none';
+                                } else {
+                                    var seasonId = row.getAttribute('data-parent-season');
+                                    var seasonHeader = document.querySelector('[data-season-id="' + seasonId + '"]');
+                                    var seasonCollapsed = seasonHeader && seasonHeader.getAttribute('data-collapsed') === 'true';
+                                    row.style.display = seasonCollapsed ? 'none' : '';
+                                }
+                            }
+                        });
+                        
+                        // Save state
+                        this.setAttribute('data-collapsed', newCollapsed ? 'true' : 'false');
+                        if (newCollapsed) {
+                            localStorage.setItem(seriesId, 'collapsed');
+                        } else {
+                            localStorage.removeItem(seriesId);
+                        }
+                    });
+                });
+
+                // Add click handlers for season headers (level 2)
+                document.querySelectorAll('.season-header').forEach(function(header) {
+                    header.addEventListener('click', function() {
+                        var seasonId = this.getAttribute('data-season-id');
+                        var isCollapsed = this.getAttribute('data-collapsed') === 'true';
+                        var newCollapsed = !isCollapsed;
+                        
+                        // Toggle icon
+                        var icon = this.querySelector('.material-icons');
+                        icon.textContent = newCollapsed ? 'chevron_right' : 'expand_more';
+                        
+                        // Toggle episode rows
+                        document.querySelectorAll('[data-parent-season="' + seasonId + '"]').forEach(function(row) {
+                            row.style.display = newCollapsed ? 'none' : '';
+                        });
+                        
+                        // Save state
+                        this.setAttribute('data-collapsed', newCollapsed ? 'true' : 'false');
+                        if (newCollapsed) {
+                            localStorage.setItem(seasonId, 'collapsed');
+                        } else {
+                            localStorage.removeItem(seasonId);
+                        }
+                    });
+                });
+
+                // Add click handlers for extract buttons
                 document.querySelectorAll('.btnExtractVideo').forEach(function(btn) {
                     btn.addEventListener('click', function() {
                         var itemId = this.getAttribute('data-id');
                         var itemName = this.getAttribute('data-name');
-                        extractVideo(itemId, itemName, this);
+                        var mode = this.getAttribute('data-mode') || 'extract';
+                        if (mode === 'delete') {
+                            deleteBinary(itemId, itemName, this);
+                        } else {
+                            extractVideo(itemId, itemName, this);
+                        }
                     });
                 });
+            }
+
+            function createVideoRow(video, isEpisode) {
+                const row = document.createElement('tr');
+                const status = video.ambilightStatus;
+                var statusIcon = 'pending';
+                var statusText = 'Pending';
+                var statusColor = '#fbbf24';
+                if (status && status.error) {
+                    statusIcon = 'error';
+                    statusText = 'Failed';
+                    statusColor = '#ef4444';
+                } else if (status && status.HasBinary) {
+                    statusIcon = 'check_circle';
+                    statusText = 'Extracted';
+                    statusColor = '#4ade80';
+                }
+                var sizeText = '-';
+                if (status && status.HasBinary && status.BinarySize != null) {
+                    sizeText = (status.BinarySize / 1024 / 1024).toFixed(2) + ' MB';
+                }
+                var videoName = video.Name || '';
+                var type = video.Type || '';
+                var videoIsEpisode = type === 'Episode';
+                var seriesName = video.SeriesName || '';
+                var seasonNumber = video.ParentIndexNumber != null ? video.ParentIndexNumber : video.SeasonIndexNumber;
+                var episodeNumber = video.IndexNumber;
+                var typeLabel = videoIsEpisode ? 'Episode' : (type || 'Movie');
+
+                var metaParts = [];
+                if (videoIsEpisode && !isEpisode) {
+                    // Only show full metadata if not grouped
+                    if (seriesName) {
+                        metaParts.push(seriesName);
+                    }
+                    var se = '';
+                    if (seasonNumber != null) {
+                        var sStr = String(seasonNumber).padStart(2, '0');
+                        se += 'S' + sStr;
+                    }
+                    if (episodeNumber != null) {
+                        var eStr = String(episodeNumber).padStart(2, '0');
+                        se += (se ? '' : '') + 'E' + eStr;
+                    }
+                    if (se) {
+                        metaParts.push(se);
+                    }
+                } else if (videoIsEpisode && isEpisode) {
+                    // For grouped episodes, show just episode number
+                    if (episodeNumber != null) {
+                        metaParts.push('Episode ' + episodeNumber);
+                    }
+                } else if (typeLabel && !videoIsEpisode) {
+                    metaParts.push(typeLabel);
+                }
+
+                var metaText = metaParts.length ? metaParts.join(' • ') : '';
+                var videoId = video.Id || '';
+                var isExtracted = !!(status && status.HasBinary);
+                var isFailed = !!(status && status.error);
+                var isExtracting = !!extractingIds[videoId] && !isExtracted && !isFailed;
+                var btnHtml = '';
+
+                if (isExtracting) {
+                    statusIcon = 'hourglass_top';
+                    statusText = 'Extracting...';
+                    statusColor = '#38bdf8';
+                    btnHtml = '<button is="emby-button" class="emby-button raised btnExtractVideo" disabled>Extracting...</button>';
+                } else {
+                    var btnClass = isExtracted
+                        ? 'emby-button raised button-delete btnExtractVideo'
+                        : 'emby-button raised button-submit btnExtractVideo';
+                    var btnMode = isExtracted ? 'delete' : 'extract';
+                    var btnLabel = isExtracted ? 'Delete bin' : 'Extract';
+                    btnHtml = '<button data-mode="' + btnMode + '" data-id="' + escapeHtml(videoId) + '" data-name="' + escapeHtml(videoName) + '" is="emby-button" class="' + btnClass + '">' + btnLabel + '</button>';
+                }
+                
+                var titleCellHtml = escapeHtml(videoName);
+                if (metaText) {
+                    titleCellHtml += '<div class="fieldDescription">' + escapeHtml(metaText) + '</div>';
+                }
+                
+                // Indent episode titles if grouped (level 3, so indent more)
+                if (isEpisode) {
+                    titleCellHtml = '<span style="padding-left: 3em;">' + titleCellHtml + '</span>';
+                }
+
+                // Format added date
+                var addedDateText = '-';
+                if (video.DateCreated) {
+                    try {
+                        var dateObj = new Date(video.DateCreated);
+                        var now = new Date();
+                        var diffMs = now - dateObj;
+                        var diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                        
+                        if (diffDays === 0) {
+                            addedDateText = 'Today';
+                        } else if (diffDays === 1) {
+                            addedDateText = 'Yesterday';
+                        } else if (diffDays < 7) {
+                            addedDateText = diffDays + ' days ago';
+                        } else if (diffDays < 30) {
+                            var weeks = Math.floor(diffDays / 7);
+                            addedDateText = weeks + (weeks === 1 ? ' week ago' : ' weeks ago');
+                        } else if (diffDays < 365) {
+                            var months = Math.floor(diffDays / 30);
+                            addedDateText = months + (months === 1 ? ' month ago' : ' months ago');
+                        } else {
+                            var years = Math.floor(diffDays / 365);
+                            addedDateText = years + (years === 1 ? ' year ago' : ' years ago');
+                        }
+                        
+                        // Also show exact date on hover
+                        var exactDate = dateObj.toLocaleDateString();
+                        addedDateText = '<span title="' + escapeHtml(exactDate) + '">' + addedDateText + '</span>';
+                    } catch (e) {
+                        addedDateText = '-';
+                    }
+                }
+
+                row.innerHTML = '<td>' + titleCellHtml + '</td>' +
+                    '<td>' + addedDateText + '</td>' +
+                    '<td><span class="material-icons" style="color:' + statusColor + ';vertical-align:middle;font-size:1.2em;">' + statusIcon + '</span> ' + statusText + '</td>' +
+                    '<td>' + sizeText + '</td>' +
+                    '<td>' + btnHtml + '</td>';
+                
+                return row;
             }
 
             async function extractVideo(itemId, itemName, button) {
@@ -752,6 +1138,7 @@
                     });
 
                     if (response.ok) {
+                        extractingIds[itemId] = true;
                         showToast('Extraction started for: ' + itemName);
                         setTimeout(function() { loadLibrary(); }, 2000);
                     } else {
@@ -762,6 +1149,31 @@
                     showToast('Failed to extract: ' + itemName);
                     button.disabled = false;
                     button.textContent = 'Extract';
+                }
+            }
+
+            async function deleteBinary(itemId, itemName, button) {
+                try {
+                    button.disabled = true;
+                    button.textContent = 'Deleting...';
+
+                    var deleteUrl = '/Ambilight/Binary/' + itemId;
+                    const response = await fetch(deleteUrl, {
+                        method: 'DELETE',
+                        credentials: 'include'
+                    });
+
+                    if (response.ok) {
+                        showToast('Deleted ambilight data for: ' + itemName);
+                        setTimeout(function () { loadLibrary(); }, 1500);
+                    } else {
+                        throw new Error('Failed to delete binary');
+                    }
+                } catch (error) {
+                    console.error('Error deleting binary:', error);
+                    showToast('Failed to delete ambilight data for: ' + itemName);
+                    button.disabled = false;
+                    button.textContent = 'Delete bin';
                 }
             }
 
@@ -807,6 +1219,18 @@
             if (document.getElementById('searchBox')) {
                 document.getElementById('searchBox').addEventListener('input', function(e) {
                     currentFilter = e.target.value;
+                    renderVideoList();
+                });
+            }
+            if (document.getElementById('statusFilter')) {
+                document.getElementById('statusFilter').addEventListener('change', function(e) {
+                    currentStatusFilter = e.target.value;
+                    renderVideoList();
+                });
+            }
+            if (document.getElementById('typeFilter')) {
+                document.getElementById('typeFilter').addEventListener('change', function(e) {
+                    currentTypeFilter = e.target.value;
                     renderVideoList();
                 });
             }
