@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -615,6 +616,128 @@ public sealed class AmbilightInProcessPlayer : IDisposable
         }
 
         return rotated;
+    }
+
+    /// <summary>
+    /// Send a loading effect to WLED: rotating ochre segment around the LED strip.
+    /// Returns a cancellation task that should be cancelled when loading completes or fails.
+    /// </summary>
+    public static Task SendLoadingEffectAsync(string host, int port, int totalLeds, ILogger logger, CancellationToken cancellationToken)
+    {
+        return Task.Run(async () =>
+        {
+            try
+            {
+                // Parse host to IP
+                if (!IPAddress.TryParse(host, out var targetIp))
+                {
+                    targetIp = Dns.GetHostAddresses(host).FirstOrDefault();
+                }
+
+                if (targetIp == null)
+                {
+                    logger.LogWarning("[Ambilight] Cannot send loading effect: no IP for host {Host}", host);
+                    return;
+                }
+
+                using var udp = new UdpClient();
+                udp.Connect(targetIp, port);
+
+                // Ochre/amber color (RGB: 204, 119, 34)
+                byte r = 204, g = 119, b = 34;
+                int segmentSize = Math.Max(totalLeds / 8, 5); // 1/8 of strip or minimum 5 LEDs
+                int bytesPerLed = 3; // RGB
+                
+                var frame = new byte[totalLeds * bytesPerLed];
+                int rotation = 0;
+
+                logger.LogInformation("[Ambilight] Showing loading effect on WLED {Host}:{Port}", host, port);
+
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    // Clear frame
+                    Array.Clear(frame, 0, frame.Length);
+
+                    // Draw rotating segment
+                    for (int i = 0; i < segmentSize; i++)
+                    {
+                        int ledIndex = (rotation + i) % totalLeds;
+                        int offset = ledIndex * bytesPerLed;
+                        frame[offset] = r;
+                        frame[offset + 1] = g;
+                        frame[offset + 2] = b;
+                    }
+
+                    await udp.SendAsync(frame, frame.Length).ConfigureAwait(false);
+                    
+                    rotation = (rotation + 1) % totalLeds;
+                    await Task.Delay(30, cancellationToken).ConfigureAwait(false); // ~33fps rotation
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Normal cancellation, don't log
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "[Ambilight] Error during loading effect");
+            }
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Send a failure flash effect to WLED: 3 red flashes, then return to original state.
+    /// WLED automatically returns to previous state when UDP stream stops.
+    /// </summary>
+    public static async Task SendFailureFlashAsync(string host, int port, int totalLeds, ILogger logger)
+    {
+        try
+        {
+            // Parse host to IP
+            if (!IPAddress.TryParse(host, out var targetIp))
+            {
+                targetIp = Dns.GetHostAddresses(host).FirstOrDefault();
+            }
+
+            if (targetIp == null)
+            {
+                logger.LogWarning("[Ambilight] Cannot send failure flash: no IP for host {Host}", host);
+                return;
+            }
+
+            using var udp = new UdpClient();
+            udp.Connect(targetIp, port);
+
+            int bytesPerLed = 3; // RGB
+            var redFrame = new byte[totalLeds * bytesPerLed];
+            var blackFrame = new byte[totalLeds * bytesPerLed];
+
+            // Fill red frame (255, 0, 0)
+            for (int i = 0; i < totalLeds; i++)
+            {
+                redFrame[i * bytesPerLed] = 255;
+                redFrame[i * bytesPerLed + 1] = 0;
+                redFrame[i * bytesPerLed + 2] = 0;
+            }
+
+            logger.LogInformation("[Ambilight] Showing failure flash on WLED {Host}:{Port}", host, port);
+
+            // Flash 3 times (red on, black off)
+            for (int flash = 0; flash < 3; flash++)
+            {
+                await udp.SendAsync(redFrame, redFrame.Length).ConfigureAwait(false);
+                await Task.Delay(150).ConfigureAwait(false);
+                await udp.SendAsync(blackFrame, blackFrame.Length).ConfigureAwait(false);
+                await Task.Delay(150).ConfigureAwait(false);
+            }
+
+            // Don't send final black frame - WLED will automatically return to its
+            // previous state (effect, pattern, or static color) when UDP stream stops
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "[Ambilight] Error during failure flash effect");
+        }
     }
 }
 

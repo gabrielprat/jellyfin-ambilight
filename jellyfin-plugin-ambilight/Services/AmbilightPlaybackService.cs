@@ -29,6 +29,7 @@ public class AmbilightPlaybackService
     // In-process C# players, keyed by session Id.
     private readonly ConcurrentDictionary<string, AmbilightInProcessPlayer> _sessionPlayers = new();
     private readonly ConcurrentDictionary<string, double> _lastPositionSeconds = new();
+    private readonly ConcurrentDictionary<string, CancellationTokenSource> _loadingEffectCancellations = new();
 
     public AmbilightPlaybackService(
         ILogger<AmbilightPlaybackService> logger,
@@ -94,19 +95,7 @@ public class AmbilightPlaybackService
             {
                 _logger.LogInformation("[Ambilight] Looking for binary at {BinPath} for item {ItemId}", binPath, itemIdStr);
             }
-            if (!File.Exists(binPath))
-            {
-                if (debug)
-                {
-                    _logger.LogInformation("[Ambilight] Skip: binary file not found at {BinPath}", binPath);
-                }
-                else
-                {
-                    _logger.LogInformation("[Ambilight] No .bin file for item {ItemName}", item.Name);
-                }
-                return;
-            }
-
+            
             var target = ResolveWledTarget(session);
             if (target is null)
             {
@@ -122,13 +111,50 @@ public class AmbilightPlaybackService
             }
 
             var (host, port) = target.Value;
+            
+            // Calculate total LEDs for effects
+            int totalLeds = _config.AmbilightTopLedCount + _config.AmbilightBottomLedCount + 
+                           _config.AmbilightLeftLedCount + _config.AmbilightRightLedCount;
+            
+            if (!File.Exists(binPath))
+            {
+                if (debug)
+                {
+                    _logger.LogInformation("[Ambilight] Skip: binary file not found at {BinPath}", binPath);
+                }
+                else
+                {
+                    _logger.LogInformation("[Ambilight] No .bin file for item {ItemName}", item.Name);
+                }
+                
+                // Show failure flash on WLED
+                _ = AmbilightInProcessPlayer.SendFailureFlashAsync(host, port, totalLeds, _logger);
+                return;
+            }
+            
+            // Start loading effect before starting player
+            var loadingCts = new CancellationTokenSource();
+            _loadingEffectCancellations[session.Id] = loadingCts;
+            _ = AmbilightInProcessPlayer.SendLoadingEffectAsync(host, port, totalLeds, _logger, loadingCts.Token);
+            
             if (debug)
             {
                 _logger.LogInformation("[Ambilight] Binary found at {BinPath}, connecting to WLED {Host}:{Port}", binPath, host, port);
             }
 
             var startSeconds = (info.PositionTicks ?? 0) / 10_000_000.0;
-            StartPlayerForSession(session.Id, binPath, host, port, startSeconds);
+            
+            // Try to start player
+            bool success = StartPlayerForSession(session.Id, binPath, host, port, startSeconds);
+            
+            // Stop loading effect
+            StopLoadingEffect(session.Id);
+            
+            // Show failure flash if player didn't start
+            if (!success)
+            {
+                _ = AmbilightInProcessPlayer.SendFailureFlashAsync(host, port, totalLeds, _logger);
+            }
         }
         catch (Exception ex)
         {
@@ -142,6 +168,11 @@ public class AmbilightPlaybackService
         {
             _logger.LogInformation("[Ambilight] Stop detected for session {SessionId}", session.Id);
         }
+        
+        // Stop loading effect if still running
+        StopLoadingEffect(session.Id);
+        
+        // Stop player
         StopPlayerForSession(session.Id);
     }
 
@@ -295,14 +326,39 @@ public class AmbilightPlaybackService
         return prop?.GetValue(session)?.ToString();
     }
 
-    private void StartPlayerForSession(string sessionId, string binPath, string host, int port, double startSeconds)
+    private bool StartPlayerForSession(string sessionId, string binPath, string host, int port, double startSeconds)
     {
-        StopPlayerForSession(sessionId);
+        try
+        {
+            StopPlayerForSession(sessionId);
 
-        var player = new AmbilightInProcessPlayer(_logger, _config);
-        player.Start(sessionId, binPath, host, port, startSeconds);
-        _sessionPlayers[sessionId] = player;
-        _logger.LogInformation("[Ambilight] Started in-process player for session {SessionId} → {Host}:{Port}", sessionId, host, port);
+            var player = new AmbilightInProcessPlayer(_logger, _config);
+            player.Start(sessionId, binPath, host, port, startSeconds);
+            _sessionPlayers[sessionId] = player;
+            _logger.LogInformation("[Ambilight] Started in-process player for session {SessionId} → {Host}:{Port}", sessionId, host, port);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[Ambilight] Failed to start player for session {SessionId}", sessionId);
+            return false;
+        }
+    }
+
+    private void StopLoadingEffect(string sessionId)
+    {
+        if (_loadingEffectCancellations.TryRemove(sessionId, out var cts))
+        {
+            try
+            {
+                cts.Cancel();
+                cts.Dispose();
+            }
+            catch
+            {
+                // Ignore cancellation errors
+            }
+        }
     }
 
     private void StopPlayerForSession(string sessionId)
