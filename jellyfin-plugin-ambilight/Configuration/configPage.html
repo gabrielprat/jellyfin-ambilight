@@ -35,6 +35,14 @@
                         <div class="fieldDescription">When enabled, ambilight data is also extracted for videos marked as "played".</div>
                     </div>
 
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="ExtractNewlyAddedItems" type="checkbox" is="emby-checkbox" />
+                            <span>Extract newly added items</span>
+                        </label>
+                        <div class="fieldDescription">When enabled, ambilight data is automatically extracted when new videos are added to non-excluded libraries.</div>
+                    </div>
+
                     <div class="selectContainer">
                         <label class="selectLabel" for="ExtractionPriority">Extraction priority</label>
                         <select is="emby-select" id="ExtractionPriority" class="emby-select-withcolor emby-select">
@@ -333,6 +341,7 @@
                     ApiClient.getPluginConfiguration(AmbilightConfig.pluginUniqueId).then(function (config) {
                         AmbilightConfig.currentConfig = config;
                         document.querySelector('#ExtractViewed').checked = config.ExtractViewed;
+                        document.querySelector('#ExtractNewlyAddedItems').checked = config.ExtractNewlyAddedItems !== false;
                         document.querySelector('#ExtractionPriority').value = config.ExtractionPriority;
                         document.querySelector('#ExtractionMaxAgeDays').value = config.ExtractionMaxAgeDays;
                         document.querySelector('#ExtractionStartTime').value = config.ExtractionStartTime;
@@ -377,6 +386,7 @@
                 Dashboard.showLoadingMsg();
                 ApiClient.getPluginConfiguration(AmbilightConfig.pluginUniqueId).then(function (config) {
                     config.ExtractViewed = document.querySelector('#ExtractViewed').checked;
+                    config.ExtractNewlyAddedItems = document.querySelector('#ExtractNewlyAddedItems').checked;
                     config.ExtractionPriority = document.querySelector('#ExtractionPriority').value;
                     config.ExtractionMaxAgeDays = document.querySelector('#ExtractionMaxAgeDays').value;
                     config.ExtractionStartTime = document.querySelector('#ExtractionStartTime').value;

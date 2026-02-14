@@ -11,6 +11,7 @@ namespace Jellyfin.Plugin.Ambilight
         // Extraction
         public string ExtractionPriority { get; set; } = "newest_first";
         public bool ExtractViewed { get; set; } = false;
+        public bool ExtractNewlyAddedItems { get; set; } = true;
         public double ExtractionMaxAgeDays { get; set; } = 0;
         public string ExtractionStartTime { get; set; } = "00:00";
         public string ExtractionEndTime { get; set; } = "23:59";

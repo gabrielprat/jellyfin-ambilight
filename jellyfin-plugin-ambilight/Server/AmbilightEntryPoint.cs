@@ -77,7 +77,6 @@ public class AmbilightEntryPoint : IHostedService
         // Subscribe to library scan events instead of polling
         _libraryManager.ItemAdded += OnItemAdded;
         _libraryManager.ItemUpdated += OnItemUpdated;
-        _libraryManager.ItemRemoved += OnItemRemoved;
 
         _logger.LogInformation("[Ambilight] Subscribed to library events");
 
@@ -97,7 +96,6 @@ public class AmbilightEntryPoint : IHostedService
         
         _libraryManager.ItemAdded -= OnItemAdded;
         _libraryManager.ItemUpdated -= OnItemUpdated;
-        _libraryManager.ItemRemoved -= OnItemRemoved;
 
         _cts?.Dispose();
 
@@ -163,6 +161,16 @@ public class AmbilightEntryPoint : IHostedService
     private void OnItemAdded(object? sender, ItemChangeEventArgs e)
     {
         if (_extractor == null || e.Item.Path == null) return;
+        
+        // Check if auto-extraction is enabled
+        if (!_config.ExtractNewlyAddedItems)
+        {
+            if (_config.Debug)
+            {
+                _logger.LogDebug("[Ambilight] Auto-extraction disabled, skipping new item: {ItemName}", e.Item.Name);
+            }
+            return;
+        }
         
         // Only process movies and episodes
         if (e.Item is not MediaBrowser.Controller.Entities.Movies.Movie && 
