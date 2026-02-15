@@ -1,0 +1,55 @@
+!.gitignore
+.DS_Store
+
+# Data directories
+data/movies
+data/tv
+data/docker-data/*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Rust
+# Cargo.lock files (generated, not needed for libraries/binaries)
+Cargo.lock
+**/Cargo.lock
+# Build artifacts
+target/
+**/target/
+# Rust incremental compilation
+**/incremental/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+.dockerignore
