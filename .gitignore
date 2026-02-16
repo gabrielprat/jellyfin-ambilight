@@ -1,0 +1,73 @@
+# Build output
+bin/
+obj/
+publish/
+Binaries/
+
+# .NET build artifacts
+*.dll
+*.exe
+*.pdb
+*.deps.json
+*.runtimeconfig.json
+*.runtimeconfig.dev.json
+
+# Visual Studio / Rider / IDEs
+*.user
+*.userprefs
+*.suo
+*.sln.docstates
+.idea/
+.vs/
+.vscode/
+*.code-workspace
+_ReSharper.*/
+*.DotSettings.user
+
+# Test results
+TestResults/
+coverage/
+*.trx
+*.coverage
+*.coveragexml
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+.nuget/
+
+# Build logs and temporary files
+*.tmp
+*.log
+*.cache
+*.bak
+*~
+*.swp
+.*.swp
+
+# Python (for helper scripts)
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# OS specific
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+# Local configuration
+*.local.*
+local.settings.json
+.env.local
+

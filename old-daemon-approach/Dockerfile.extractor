@@ -1,0 +1,96 @@
+# Stage 1: Build Rust extractor binary
+FROM rust:1.84 as builder
+
+WORKDIR /usr/src/ambilight-extractor
+
+# Install build dependencies for FFmpeg (including libclang for bindgen)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        pkg-config \
+        build-essential \
+        clang \
+        libclang-dev \
+        llvm \
+        libavcodec-dev \
+        libavformat-dev \
+        libavutil-dev \
+        libavfilter-dev \
+        libavdevice-dev \
+        libswscale-dev \
+        libswresample-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Cargo.toml and source
+COPY ambilight-extractor/Cargo.toml ./
+COPY ambilight-extractor/src ./src
+
+# Verify FFmpeg installation and headers
+# The version macros should be in libavcodec/version.h or libavcodec/version_major.h
+RUN echo "Checking FFmpeg installation..." && \
+    pkg-config --modversion libavcodec && \
+    pkg-config --cflags libavcodec && \
+    test -f /usr/include/libavcodec/avcodec.h && \
+    (test -f /usr/include/libavcodec/version.h && echo "Found version.h") || \
+    (test -f /usr/include/libavcodec/version_major.h && echo "Found version_major.h") || \
+    echo "Checking for version macros in headers..." && \
+    find /usr/include/libavcodec -name "*.h" -exec grep -l "LIBAVCODEC_VERSION" {} \; | head -3
+
+# Create minimal vaapi.h stub if the header is missing (vaapi is optional for hardware acceleration)
+RUN if [ ! -f /usr/include/libavcodec/vaapi.h ]; then \
+        mkdir -p /usr/include/libavcodec && \
+        echo "/* Stub: vaapi hardware acceleration not needed for software decoding */" > /usr/include/libavcodec/vaapi.h && \
+        echo "#ifndef AVCODEC_VAAPI_H" >> /usr/include/libavcodec/vaapi.h && \
+        echo "#define AVCODEC_VAAPI_H" >> /usr/include/libavcodec/vaapi.h && \
+        echo "typedef void* VADisplay;" >> /usr/include/libavcodec/vaapi.h && \
+        echo "typedef unsigned int VASurfaceID;" >> /usr/include/libavcodec/vaapi.h && \
+        echo "#endif" >> /usr/include/libavcodec/vaapi.h; \
+    fi
+
+# Set PKG_CONFIG_PATH to ensure pkg-config finds FFmpeg
+ENV PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/pkgconfig
+
+# Ensure FFmpeg headers are accessible and version macros are available
+# The build script needs to include libavcodec/version.h to get version macros
+ENV C_INCLUDE_PATH=/usr/include
+ENV CPATH=/usr/include
+
+# Build the extractor (Cargo.lock will be generated in container)
+RUN cargo build --release
+
+# Stage 2: Runtime (same base image as builder to avoid ABI/version mismatches)
+FROM rust:1.84
+
+# Install Python and runtime dependencies (FFmpeg runtime libraries)
+# Note: Using dev libraries in runtime stage to ensure ABI compatibility with builder
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-requests \
+    libavcodec-dev \
+    libavformat-dev \
+    libavutil-dev \
+    libavfilter-dev \
+    libavdevice-dev \
+    libswscale-dev \
+    libswresample-dev \
+    ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy Rust binary from builder
+COPY --from=builder /usr/src/ambilight-extractor/target/release/ambilight-extractor /usr/local/bin/ambilight-extractor
+
+# Copy Python daemon and dependencies
+COPY ambilight-daemon-extractor.py /app/ambilight-daemon-extractor.py
+COPY storage/ /app/storage/
+
+# Python dependencies: only 'requests' is needed by the extractor daemon; installed via apt above
+
+# Create data directory
+ENV AMBILIGHT_DATA_DIR=/app/data/ambilight
+RUN mkdir -p $AMBILIGHT_DATA_DIR/binaries
+
+# Make Python scripts executable
+RUN chmod +x /app/ambilight-daemon-extractor.py
+
+CMD ["python3", "-u", "/app/ambilight-daemon-extractor.py"]
