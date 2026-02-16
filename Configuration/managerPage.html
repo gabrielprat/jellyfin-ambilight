@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Ambilight Manager</title>
+</head>
+<body>
+    <div id="AmbilightManagerPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox">
+        <div data-role="content">
+            <div class="content-primary">
+                <div class="verticalSection">
+                    <h2 class="sectionTitle">Ambilight Extraction Manager</h2>
+                    <p class="sectionSubTitle">Manage ambilight data extraction for your video library</p>
+                </div>
+
+                <div class="verticalSection">
+                    <div style="display: flex; gap: 1em; margin-bottom: 1em; flex-wrap: wrap;">
+                        <button id="btnRefresh" is="emby-button" class="raised button-submit">
+                            <span class="material-icons" style="vertical-align: middle;">refresh</span>
+                            Refresh
+                        </button>
+                        <button id="btnExtractAll" is="emby-button" class="raised button-submit">
+                            <span class="material-icons" style="vertical-align: middle;">play_arrow</span>
+                            Extract All Pending
+                        </button>
+                        <input id="searchBox" type="text" is="emby-input" placeholder="Search videos..." style="flex: 1; min-width: 200px;">
+                    </div>
+
+                    <div style="display: flex; gap: 2em; margin-bottom: 1em;">
+                        <div class="paperList">
+                            <div class="listItem">
+                                <span class="material-icons" style="color: #4ade80;">check_circle</span>
+                                <span id="statsExtracted">0</span> Extracted
+                            </div>
+                        </div>
+                        <div class="paperList">
+                            <div class="listItem">
+                                <span class="material-icons" style="color: #fbbf24;">pending</span>
+                                <span id="statsPending">0</span> Pending
+                            </div>
+                        </div>
+                        <div class="paperList">
+                            <div class="listItem">
+                                <span class="material-icons" style="color: #ef4444;">error</span>
+                                <span id="statsFailed">0</span> Failed
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="verticalSection">
+                    <div id="loadingMessage" style="text-align: center; padding: 2em;">
+                        <div class="emby-progressring"></div>
+                        <p>Loading library...</p>
+                    </div>
+
+                    <div id="videoList" style="display: none;">
+                        <div class="paperList">
+                            <table class="tblLibrary" style="width: 100%;">
+                                <thead>
+                                    <tr>
+                                        <th>Title</th>
+                                        <th>Status</th>
+                                        <th>Size</th>
+                                        <th>Path</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="videoTableBody">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script type="text/javascript">
+            (function() {
+                'use strict';
+
+                let allVideos = [];
+                let currentFilter = '';
+
+                async function loadLibrary() {
+                    try {
+                        Dashboard.showLoadingMsg();
+                        
+                        // Get all movies and episodes
+                        const query = {
+                            IncludeItemTypes: 'Movie,Episode',
+                            Recursive: true,
+                            Fields: 'Path,DateCreated',
+                            SortBy: 'SortName',
+                            SortOrder: 'Ascending'
+                        };
+
+                        const result = await ApiClient.getItems(ApiClient.getCurrentUserId(), query);
+                        allVideos = result.Items || [];
+
+                        // Check status for each video
+                        const statusPromises = allVideos.map(async (video) => {
+                            try {
+                                const response = await fetch(`/Ambilight/Status/${video.Id}`, {
+                                    credentials: 'include'
+                                });
+                                if (response.ok) {
+                                    video.ambilightStatus = await response.json();
+                                } else {
+                                    video.ambilightStatus = { HasBinary: false, BinarySize: 0 };
+                                }
+                            } catch (e) {
+                                video.ambilightStatus = { HasBinary: false, BinarySize: 0, error: true };
+                            }
+                            return video;
+                        });
+
+                        await Promise.all(statusPromises);
+
+                        updateStatistics();
+                        renderVideoList();
+
+                        document.getElementById('loadingMessage').style.display = 'none';
+                        document.getElementById('videoList').style.display = 'block';
+
+                        Dashboard.hideLoadingMsg();
+                    } catch (error) {
+                        console.error('Error loading library:', error);
+                        Dashboard.hideLoadingMsg();
+                        require(['toast'], function(toast) {
+                            toast('Failed to load library: ' + error.message);
+                        });
+                    }
+                }
+
+                function updateStatistics() {
+                    const extracted = allVideos.filter(v => v.ambilightStatus?.HasBinary).length;
+                    const failed = allVideos.filter(v => v.ambilightStatus?.error).length;
+                    const pending = allVideos.length - extracted - failed;
+
+                    document.getElementById('statsExtracted').textContent = extracted;
+                    document.getElementById('statsPending').textContent = pending;
+                    document.getElementById('statsFailed').textContent = failed;
+                }
+
+                function renderVideoList() {
+                    const tbody = document.getElementById('videoTableBody');
+                    tbody.innerHTML = '';
+
+                    const filteredVideos = allVideos.filter(video => {
+                        if (!currentFilter) return true;
+                        return video.Name.toLowerCase().includes(currentFilter.toLowerCase());
+                    });
+
+                    filteredVideos.forEach(video => {
+                        const row = document.createElement('tr');
+                        
+                        const status = video.ambilightStatus;
+                        let statusIcon, statusText, statusColor;
+                        
+                        if (status?.error) {
+                            statusIcon = 'error';
+                            statusText = 'Failed';
+                            statusColor = '#ef4444';
+                        } else if (status?.HasBinary) {
+                            statusIcon = 'check_circle';
+                            statusText = 'Extracted';
+                            statusColor = '#4ade80';
+                        } else {
+                            statusIcon = 'pending';
+                            statusText = 'Pending';
+                            statusColor = '#fbbf24';
+                        }
+
+                        const sizeText = status?.HasBinary 
+                            ? (status.BinarySize / 1024 / 1024).toFixed(2) + ' MB'
+                            : '-';
+
+                        row.innerHTML = `
+                            <td>${video.Name}</td>
+                            <td>
+                                <span class="material-icons" style="color: ${statusColor}; vertical-align: middle; font-size: 1.2em;">${statusIcon}</span>
+                                ${statusText}
+                            </td>
+                            <td>${sizeText}</td>
+                            <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${video.Path || 'N/A'}">
+                                ${video.Path || 'N/A'}
+                            </td>
+                            <td>
+                                <button class="btnExtractVideo" data-id="${video.Id}" data-name="${video.Name}" 
+                                    ${status?.HasBinary ? 'disabled' : ''} 
+                                    is="emby-button" class="raised button-submit">
+                                    ${status?.HasBinary ? 'Extracted' : 'Extract'}
+                                </button>
+                            </td>
+                        `;
+
+                        tbody.appendChild(row);
+                    });
+
+                    // Add click handlers for extract buttons
+                    document.querySelectorAll('.btnExtractVideo').forEach(btn => {
+                        btn.addEventListener('click', function() {
+                            const itemId = this.getAttribute('data-id');
+                            const itemName = this.getAttribute('data-name');
+                            extractVideo(itemId, itemName, this);
+                        });
+                    });
+                }
+
+                async function extractVideo(itemId, itemName, button) {
+                    try {
+                        button.disabled = true;
+                        button.textContent = 'Extracting...';
+
+                        const response = await fetch(`/Ambilight/Extract/${itemId}`, {
+                            method: 'POST',
+                            credentials: 'include'
+                        });
+
+                        if (response.ok) {
+                            const result = await response.json();
+                            require(['toast'], function(toast) {
+                                toast('Extraction started for: ' + itemName);
+                            });
+
+                            // Refresh after a delay
+                            setTimeout(() => loadLibrary(), 2000);
+                        } else {
+                            throw new Error('Failed to start extraction');
+                        }
+                    } catch (error) {
+                        console.error('Error extracting video:', error);
+                        require(['toast'], function(toast) {
+                            toast('Failed to extract: ' + itemName);
+                        });
+                        button.disabled = false;
+                        button.textContent = 'Extract';
+                    }
+                }
+
+                async function extractAllPending() {
+                    const pending = allVideos.filter(v => !v.ambilightStatus?.HasBinary && !v.ambilightStatus?.error);
+                    
+                    if (pending.length === 0) {
+                        require(['toast'], function(toast) {
+                            toast('No pending videos to extract');
+                        });
+                        return;
+                    }
+
+                    if (!confirm(`Extract ambilight data for ${pending.length} videos?`)) {
+                        return;
+                    }
+
+                    Dashboard.showLoadingMsg();
+
+                    for (const video of pending) {
+                        try {
+                            await fetch(`/Ambilight/Extract/${video.Id}`, {
+                                method: 'POST',
+                                credentials: 'include'
+                            });
+                        } catch (e) {
+                            console.error('Failed to extract:', video.Name, e);
+                        }
+                    }
+
+                    Dashboard.hideLoadingMsg();
+                    require(['toast'], function(toast) {
+                        toast(`Started extraction for ${pending.length} videos`);
+                    });
+
+                    setTimeout(() => loadLibrary(), 3000);
+                }
+
+                // Event handlers
+                document.getElementById('btnRefresh').addEventListener('click', loadLibrary);
+                document.getElementById('btnExtractAll').addEventListener('click', extractAllPending);
+                document.getElementById('searchBox').addEventListener('input', function(e) {
+                    currentFilter = e.target.value;
+                    renderVideoList();
+                });
+
+                // Initial load
+                document.querySelector('#AmbilightManagerPage').addEventListener('pageshow', function() {
+                    loadLibrary();
+                });
+            })();
+        </script>
+    </div>
+</body>
+</html>
