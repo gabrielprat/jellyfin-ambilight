@@ -48,14 +48,15 @@ This will automatically trigger the GitHub Actions workflow that:
 
 ### 4. Manifest.json is Updated Automatically
 
-The manifest.json file is **automatically updated** by a GitHub Actions workflow when you publish a release. The workflow will:
+The manifest.json file is **automatically updated** as part of the release workflow. When you push a tag, the workflow will:
 
-1. Download the release zip file
-2. Calculate the MD5 checksum
-3. Update manifest.json with the new version, checksum, and timestamp
-4. Commit and push the changes
+1. Build the plugin
+2. Create the release with the zip file
+3. Calculate the MD5 checksum
+4. Update manifest.json with the new version, checksum, and timestamp
+5. Commit and push the changes
 
-**No manual action required!** Just wait a minute after publishing the release for the workflow to complete.
+**No manual action required!** Everything happens in one automated workflow.
 
 ## Adding New Versions
 
