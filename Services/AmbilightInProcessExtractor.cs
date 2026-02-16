@@ -207,7 +207,10 @@ public sealed class AmbilightInProcessExtractor
 
             try
             {
-                _logger.LogInformation("[Ambilight] Extractor: starting ffmpeg for {Path}", videoPath);
+                if (_config.Debug)
+                {
+                    _logger.LogInformation("[Ambilight] Extractor: starting ffmpeg for {Path}", videoPath);
+                }
                 ffmpeg.Start();
             }
             catch (Exception ex)
@@ -311,7 +314,10 @@ public sealed class AmbilightInProcessExtractor
                 // ignore size errors
             }
 
-            _logger.LogInformation("[Ambilight] Extractor: wrote AMb2 file {Output} with {Frames} frames", outputPath, frameIndex);
+            if (_config.Debug)
+            {
+                _logger.LogInformation("[Ambilight] Extractor: wrote AMb2 file {Output} with {Frames} frames", outputPath, frameIndex);
+            }
             if (_config.Debug)
             {
                 _logger.LogInformation("[Ambilight] Extractor: final file {Output} size {SizeBytes} bytes (~{SizeMb:F2} MB)",
