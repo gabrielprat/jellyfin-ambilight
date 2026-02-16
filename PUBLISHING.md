@@ -46,26 +46,16 @@ This will automatically trigger the GitHub Actions workflow that:
 - Creates a GitHub release
 - Uploads the package as a release asset
 
-### 4. Update manifest.json
+### 4. Manifest.json is Updated Automatically
 
-After the release is created:
+The manifest.json file is **automatically updated** by a GitHub Actions workflow when you publish a release. The workflow will:
 
 1. Download the release zip file
-2. Calculate the MD5 checksum if not shown in release notes:
-   ```bash
-   md5sum jellyfin-plugin-ambilight_1.0.0.0.zip
-   ```
-3. Update `manifest.json`:
-   - Update the `checksum` field
-   - Update the `timestamp` to current UTC time
-   - Verify the `sourceUrl` matches the actual release URL
+2. Calculate the MD5 checksum
+3. Update manifest.json with the new version, checksum, and timestamp
+4. Commit and push the changes
 
-4. Commit and push the updated manifest:
-   ```bash
-   git add manifest.json
-   git commit -m "Update manifest for v1.0.0.0"
-   git push origin master
-   ```
+**No manual action required!** Just wait a minute after publishing the release for the workflow to complete.
 
 ## Adding New Versions
 

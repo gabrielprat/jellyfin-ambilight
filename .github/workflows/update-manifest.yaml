@@ -1,0 +1,61 @@
+name: Update Manifest
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  update-manifest:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: master
+    
+    - name: Get release info
+      id: release
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/v}
+        echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+        echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+    
+    - name: Download release asset
+      run: |
+        ASSET_URL="https://github.com/${{ github.repository }}/releases/download/${{ steps.release.outputs.TAG }}/jellyfin-plugin-ambilight_${{ steps.release.outputs.VERSION }}.zip"
+        echo "Downloading from: $ASSET_URL"
+        curl -L -o plugin.zip "$ASSET_URL"
+    
+    - name: Calculate checksum
+      id: checksum
+      run: |
+        CHECKSUM=$(md5sum plugin.zip | awk '{print toupper($1)}')
+        echo "CHECKSUM=$CHECKSUM" >> $GITHUB_OUTPUT
+        echo "Calculated checksum: $CHECKSUM"
+    
+    - name: Update manifest.json
+      run: |
+        TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        
+        # Use jq to update the manifest
+        jq --arg version "${{ steps.release.outputs.VERSION }}" \
+           --arg checksum "${{ steps.checksum.outputs.CHECKSUM }}" \
+           --arg timestamp "$TIMESTAMP" \
+           --arg sourceUrl "https://github.com/${{ github.repository }}/releases/download/${{ steps.release.outputs.TAG }}/jellyfin-plugin-ambilight_${{ steps.release.outputs.VERSION }}.zip" \
+           '.[0].versions[0].version = $version |
+            .[0].versions[0].checksum = $checksum |
+            .[0].versions[0].timestamp = $timestamp |
+            .[0].versions[0].sourceUrl = $sourceUrl' \
+           manifest.json > manifest.json.tmp
+        
+        mv manifest.json.tmp manifest.json
+    
+    - name: Commit and push changes
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add manifest.json
+        git commit -m "Auto-update manifest.json for v${{ steps.release.outputs.VERSION }}"
+        git push origin master
