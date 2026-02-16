@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/gabrielprat/jellyfin-ambilight/master/docs/thumb.png",
     "versions": [
       {
-        "version": "1.2.1",
+        "version": "1.2.2",
         "changelog": "Initial release\n- In-process C# ambilight extraction and playback\n- Per-device WLED mappings with individual LED configurations\n- Real-time color synchronization\n- Automatic extraction of new videos\n- Multi-zone support for multiple WLED controllers",
         "targetAbi": "10.10.0.0",
-        "sourceUrl": "https://github.com/gabrielprat/jellyfin-ambilight/releases/download/v1.2.1/jellyfin-plugin-ambilight_1.2.1.zip",
-        "checksum": "CCC8273B30CEC45D7D1A966FAFD48484",
-        "timestamp": "2026-02-16T12:11:00Z"
+        "sourceUrl": "https://github.com/gabrielprat/jellyfin-ambilight/releases/download/v1.2.2/jellyfin-plugin-ambilight_1.2.2.zip",
+        "checksum": "B3AC3C925D7C822A1433C3D23EC13081",
+        "timestamp": "2026-02-16T12:13:00Z"
       }
     ]
   }
