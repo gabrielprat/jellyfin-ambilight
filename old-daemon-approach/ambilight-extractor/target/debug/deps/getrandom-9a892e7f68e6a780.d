@@ -1,0 +1,11 @@
+/Users/gabi/workspace/playground/jellyfin-ambilight/ambilight-extractor/target/debug/deps/getrandom-9a892e7f68e6a780.d: /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.1.16/src/lib.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.1.16/src/error.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.1.16/src/util.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.1.16/src/error_impls.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.1.16/src/util_libc.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.1.16/src/use_file.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.1.16/src/macos.rs
+
+/Users/gabi/workspace/playground/jellyfin-ambilight/ambilight-extractor/target/debug/deps/libgetrandom-9a892e7f68e6a780.rmeta: /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.1.16/src/lib.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.1.16/src/error.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.1.16/src/util.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.1.16/src/error_impls.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.1.16/src/util_libc.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.1.16/src/use_file.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.1.16/src/macos.rs
+
+/Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.1.16/src/lib.rs:
+/Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.1.16/src/error.rs:
+/Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.1.16/src/util.rs:
+/Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.1.16/src/error_impls.rs:
+/Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.1.16/src/util_libc.rs:
+/Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.1.16/src/use_file.rs:
+/Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/getrandom-0.1.16/src/macos.rs:

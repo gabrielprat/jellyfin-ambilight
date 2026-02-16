@@ -1,0 +1,13 @@
+/Users/gabi/workspace/playground/jellyfin-ambilight/ambilight-extractor/target/debug/deps/clang_sys-a3d8e07fbbe57730.d: /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clang-sys-0.29.3/src/lib.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clang-sys-0.29.3/src/support.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clang-sys-0.29.3/src/link.rs /Users/gabi/workspace/playground/jellyfin-ambilight/ambilight-extractor/target/debug/build/clang-sys-711ef9efffbe95e1/out/common.rs /Users/gabi/workspace/playground/jellyfin-ambilight/ambilight-extractor/target/debug/build/clang-sys-711ef9efffbe95e1/out/dynamic.rs
+
+/Users/gabi/workspace/playground/jellyfin-ambilight/ambilight-extractor/target/debug/deps/libclang_sys-a3d8e07fbbe57730.rlib: /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clang-sys-0.29.3/src/lib.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clang-sys-0.29.3/src/support.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clang-sys-0.29.3/src/link.rs /Users/gabi/workspace/playground/jellyfin-ambilight/ambilight-extractor/target/debug/build/clang-sys-711ef9efffbe95e1/out/common.rs /Users/gabi/workspace/playground/jellyfin-ambilight/ambilight-extractor/target/debug/build/clang-sys-711ef9efffbe95e1/out/dynamic.rs
+
+/Users/gabi/workspace/playground/jellyfin-ambilight/ambilight-extractor/target/debug/deps/libclang_sys-a3d8e07fbbe57730.rmeta: /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clang-sys-0.29.3/src/lib.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clang-sys-0.29.3/src/support.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clang-sys-0.29.3/src/link.rs /Users/gabi/workspace/playground/jellyfin-ambilight/ambilight-extractor/target/debug/build/clang-sys-711ef9efffbe95e1/out/common.rs /Users/gabi/workspace/playground/jellyfin-ambilight/ambilight-extractor/target/debug/build/clang-sys-711ef9efffbe95e1/out/dynamic.rs
+
+/Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clang-sys-0.29.3/src/lib.rs:
+/Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clang-sys-0.29.3/src/support.rs:
+/Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clang-sys-0.29.3/src/link.rs:
+/Users/gabi/workspace/playground/jellyfin-ambilight/ambilight-extractor/target/debug/build/clang-sys-711ef9efffbe95e1/out/common.rs:
+/Users/gabi/workspace/playground/jellyfin-ambilight/ambilight-extractor/target/debug/build/clang-sys-711ef9efffbe95e1/out/dynamic.rs:
+
+# env-dep:OUT_DIR=/Users/gabi/workspace/playground/jellyfin-ambilight/ambilight-extractor/target/debug/build/clang-sys-711ef9efffbe95e1/out

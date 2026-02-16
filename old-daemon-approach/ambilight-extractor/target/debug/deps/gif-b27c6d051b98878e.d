@@ -1,0 +1,12 @@
+/Users/gabi/workspace/playground/jellyfin-ambilight/ambilight-extractor/target/debug/deps/gif-b27c6d051b98878e.d: /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.13.3/src/lib.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.13.3/src/traits.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.13.3/src/common.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.13.3/src/reader/mod.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.13.3/src/reader/decoder.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.13.3/src/reader/converter.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.13.3/src/encoder.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.13.3/src/../README.md
+
+/Users/gabi/workspace/playground/jellyfin-ambilight/ambilight-extractor/target/debug/deps/libgif-b27c6d051b98878e.rmeta: /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.13.3/src/lib.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.13.3/src/traits.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.13.3/src/common.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.13.3/src/reader/mod.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.13.3/src/reader/decoder.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.13.3/src/reader/converter.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.13.3/src/encoder.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.13.3/src/../README.md
+
+/Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.13.3/src/lib.rs:
+/Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.13.3/src/traits.rs:
+/Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.13.3/src/common.rs:
+/Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.13.3/src/reader/mod.rs:
+/Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.13.3/src/reader/decoder.rs:
+/Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.13.3/src/reader/converter.rs:
+/Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.13.3/src/encoder.rs:
+/Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gif-0.13.3/src/../README.md:
