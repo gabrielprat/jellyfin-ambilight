@@ -42,7 +42,7 @@ jobs:
       id: checksum
       run: |
         cd release
-        CHECKSUM=$(md5sum jellyfin-plugin-ambilight_${{ steps.version.outputs.VERSION }}.zip | awk '{print $1}')
+        CHECKSUM=$(md5sum jellyfin-plugin-ambilight_${{ steps.version.outputs.VERSION }}.zip | awk '{print toupper($1)}')
         echo "CHECKSUM=$CHECKSUM" >> $GITHUB_OUTPUT
         echo "Checksum: $CHECKSUM"
     
@@ -65,3 +65,38 @@ jobs:
         prerelease: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Install jq
+      run: sudo apt-get update && sudo apt-get install -y jq
+    
+    - name: Update manifest.json
+      run: |
+        TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        
+        # Use jq to update the manifest
+        jq --arg version "${{ steps.version.outputs.VERSION }}" \
+           --arg checksum "${{ steps.checksum.outputs.CHECKSUM }}" \
+           --arg timestamp "$TIMESTAMP" \
+           --arg sourceUrl "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/jellyfin-plugin-ambilight_${{ steps.version.outputs.VERSION }}.zip" \
+           '.[0].versions[0].version = $version |
+            .[0].versions[0].checksum = $checksum |
+            .[0].versions[0].timestamp = $timestamp |
+            .[0].versions[0].sourceUrl = $sourceUrl' \
+           manifest.json > manifest.json.tmp
+        
+        mv manifest.json.tmp manifest.json
+    
+    - name: Commit and push manifest update
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add manifest.json
+        
+        # Check if there are changes to commit
+        if git diff --staged --quiet; then
+          echo "No changes to manifest.json"
+          exit 0
+        fi
+        
+        git commit -m "Auto-update manifest.json for v${{ steps.version.outputs.VERSION }}"
+        git push origin master
