@@ -155,7 +155,7 @@ The plugin includes a built-in extraction manager that handles video processing:
 
 The plugin looks for:
 - Movies
-- TV show episodes  
+- TV show episodes
 - Videos matching your time window settings
 - Items without existing ambilight data
 
@@ -174,21 +174,11 @@ The plugin looks for:
 
 ### Manual Extraction
 
-If you want to extract specific videos immediately, you have two options:
-
-#### Option 1: Extraction Manager Page
+#### Extraction Manager Page
 1. Go to **Jellyfin Dashboard** → **Plugins** → **Ambilight**
 2. Click on the **Manager** tab
 3. View all videos and their extraction status
 4. Click "Extract" on specific items or "Extract All"
-
-#### Option 2: Userscript Button (Optional)
-Install the browser userscript to add an "Extract Ambilight" button directly on video detail pages:
-
-1. Install a userscript manager (Tampermonkey, Violentmonkey, or Greasemonkey)
-2. Open `userscript/jellyfin-ambilight-ui.user.js` from this repository
-3. Copy the contents and create a new userscript
-4. The button will appear on movie and episode pages
 
 ## Troubleshooting
 
@@ -240,13 +230,6 @@ The plugin supports unlimited device-to-WLED mappings:
 - Map "Theater Room" → `192.168.1.104:19446` (ceiling LEDs)
 
 When playing on "Theater Room", all 3 WLED instances receive synchronized color data!
-
-### Performance Tuning
-
-- **Lower CPU Priority** - Slower extraction, less impact on server
-- **Smaller Batch Size** - Process fewer videos at once
-- **Longer Scan Interval** - Check for new videos less often
-- **Time Window** - Limit extraction to recent content only
 
 ### Storage Management
 
