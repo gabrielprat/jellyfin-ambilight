@@ -35,6 +35,9 @@ jobs:
         echo "CHECKSUM=$CHECKSUM" >> $GITHUB_OUTPUT
         echo "Calculated checksum: $CHECKSUM"
     
+    - name: Install jq
+      run: sudo apt-get update && sudo apt-get install -y jq
+    
     - name: Update manifest.json
       run: |
         TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
