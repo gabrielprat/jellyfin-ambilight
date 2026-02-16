@@ -26,7 +26,26 @@ jobs:
       run: |
         ASSET_URL="https://github.com/${{ github.repository }}/releases/download/${{ steps.release.outputs.TAG }}/jellyfin-plugin-ambilight_${{ steps.release.outputs.VERSION }}.zip"
         echo "Downloading from: $ASSET_URL"
-        curl -L -o plugin.zip "$ASSET_URL"
+        
+        # Wait a bit for the asset to be available
+        echo "Waiting 30 seconds for asset to be available..."
+        sleep 30
+        
+        # Retry logic
+        for i in {1..5}; do
+          if curl -L -f -o plugin.zip "$ASSET_URL"; then
+            echo "Successfully downloaded asset"
+            break
+          else
+            echo "Download attempt $i failed, retrying in 10 seconds..."
+            sleep 10
+          fi
+          
+          if [ $i -eq 5 ]; then
+            echo "Failed to download asset after 5 attempts"
+            exit 1
+          fi
+        done
     
     - name: Calculate checksum
       id: checksum
@@ -60,5 +79,12 @@ jobs:
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
         git add manifest.json
+        
+        # Check if there are changes to commit
+        if git diff --staged --quiet; then
+          echo "No changes to manifest.json"
+          exit 0
+        fi
+        
         git commit -m "Auto-update manifest.json for v${{ steps.release.outputs.VERSION }}"
         git push origin master
