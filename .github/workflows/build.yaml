@@ -1,0 +1,46 @@
+name: Build Plugin
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+  release:
+    types: [ published ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+    
+    - name: Restore dependencies
+      run: dotnet restore
+    
+    - name: Build
+      run: dotnet build --no-restore --configuration Release
+    
+    - name: Create release package
+      if: github.event_name == 'release'
+      run: |
+        mkdir -p release/Jellyfin.Plugin.Ambilight
+        cp bin/Release/net8.0/Jellyfin.Plugin.Ambilight.dll release/Jellyfin.Plugin.Ambilight/
+        cd release
+        zip -r jellyfin-plugin-ambilight_${{ github.event.release.tag_name }}.zip Jellyfin.Plugin.Ambilight
+    
+    - name: Upload Release Asset
+      if: github.event_name == 'release'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./release/jellyfin-plugin-ambilight_${{ github.event.release.tag_name }}.zip
+        asset_name: jellyfin-plugin-ambilight_${{ github.event.release.tag_name }}.zip
+        asset_content_type: application/zip
