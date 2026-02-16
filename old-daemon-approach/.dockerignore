@@ -1,0 +1,33 @@
+# Git and version control
+.git/
+.gitignore
+
+# Documentation
+README.md
+*.md
+
+# Environment files
+.env*
+env.*
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Database files (will be created in container)
+*.db
+data/
+
+# Docker files
+Dockerfile
+docker-compose.yaml
+.dockerignore

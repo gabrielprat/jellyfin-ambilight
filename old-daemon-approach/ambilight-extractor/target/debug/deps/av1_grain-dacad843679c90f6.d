@@ -1,0 +1,11 @@
+/Users/gabi/workspace/playground/jellyfin-ambilight/ambilight-extractor/target/debug/deps/av1_grain-dacad843679c90f6.d: /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/av1-grain-0.2.5/src/lib.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/av1-grain-0.2.5/src/create.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/av1-grain-0.2.5/src/diff.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/av1-grain-0.2.5/src/diff/solver.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/av1-grain-0.2.5/src/diff/solver/util.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/av1-grain-0.2.5/src/parse.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/av1-grain-0.2.5/src/util.rs
+
+/Users/gabi/workspace/playground/jellyfin-ambilight/ambilight-extractor/target/debug/deps/libav1_grain-dacad843679c90f6.rmeta: /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/av1-grain-0.2.5/src/lib.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/av1-grain-0.2.5/src/create.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/av1-grain-0.2.5/src/diff.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/av1-grain-0.2.5/src/diff/solver.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/av1-grain-0.2.5/src/diff/solver/util.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/av1-grain-0.2.5/src/parse.rs /Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/av1-grain-0.2.5/src/util.rs
+
+/Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/av1-grain-0.2.5/src/lib.rs:
+/Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/av1-grain-0.2.5/src/create.rs:
+/Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/av1-grain-0.2.5/src/diff.rs:
+/Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/av1-grain-0.2.5/src/diff/solver.rs:
+/Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/av1-grain-0.2.5/src/diff/solver/util.rs:
+/Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/av1-grain-0.2.5/src/parse.rs:
+/Users/gabi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/av1-grain-0.2.5/src/util.rs:
