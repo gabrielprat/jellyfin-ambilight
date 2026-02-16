@@ -196,7 +196,10 @@ public class AmbilightEntryPoint : IHostedService
             }
         }
 
-        _logger.LogInformation("[Ambilight] New item added: {ItemName} - queueing for extraction", e.Item.Name);
+        if (_config.Debug)
+        {
+            _logger.LogInformation("[Ambilight] New item added: {ItemName} - queueing for extraction", e.Item.Name);
+        }
         
         // Queue extraction in background - extract ONLY the new item, not all pending items
         _ = Task.Run(async () =>
@@ -226,7 +229,10 @@ public class AmbilightEntryPoint : IHostedService
                 // Check if extraction is needed (binary doesn't exist)
                 if (!_storage.BinaryExists(itemIdStr))
                 {
-                    _logger.LogInformation("[Ambilight] Starting extraction for new item: {ItemName}", e.Item.Name);
+                    if (_config.Debug)
+                    {
+                        _logger.LogInformation("[Ambilight] Starting extraction for new item: {ItemName}", e.Item.Name);
+                    }
                     await _extractor.RunExtractorForItemAsync(ambiItem, _cts?.Token ?? CancellationToken.None);
                 }
                 else

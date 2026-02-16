@@ -99,10 +99,6 @@ public class AmbilightPlaybackService
                 {
                     _logger.LogInformation("[Ambilight] Skip: binary file not found at {BinPath}", binPath);
                 }
-                else
-                {
-                    _logger.LogInformation("[Ambilight] No .bin file for item {ItemName}", item.Name);
-                }
                 
                 // Show failure flash on all WLED instances
                 foreach (var mapping in targets)
@@ -316,10 +312,13 @@ public class AmbilightPlaybackService
                 player.Start(sessionId, binPath, mapping, startSeconds, loadingEffectCts);
                 players.Add(player);
                 
-                int totalLeds = mapping.TopLedCount + mapping.BottomLedCount + mapping.LeftLedCount + mapping.RightLedCount;
-                _logger.LogInformation("[Ambilight] Started player for session {SessionId} → {Host}:{Port} ({Leds} LEDs: T{Top} B{Bottom} L{Left} R{Right})", 
-                    sessionId, mapping.Host, mapping.Port, totalLeds, 
-                    mapping.TopLedCount, mapping.BottomLedCount, mapping.LeftLedCount, mapping.RightLedCount);
+                if (_config.Debug)
+                {
+                    int totalLeds = mapping.TopLedCount + mapping.BottomLedCount + mapping.LeftLedCount + mapping.RightLedCount;
+                    _logger.LogInformation("[Ambilight] Started player for session {SessionId} → {Host}:{Port} ({Leds} LEDs: T{Top} B{Bottom} L{Left} R{Right})", 
+                        sessionId, mapping.Host, mapping.Port, totalLeds, 
+                        mapping.TopLedCount, mapping.BottomLedCount, mapping.LeftLedCount, mapping.RightLedCount);
+                }
             }
             
             _sessionPlayers[sessionId] = players;
@@ -361,6 +360,9 @@ public class AmbilightPlaybackService
             player.Dispose();
         }
         
-        _logger.LogInformation("[Ambilight] Stopped {Count} in-process player(s) for session {SessionId}", players.Count, sessionId);
+        if (_config.Debug)
+        {
+            _logger.LogInformation("[Ambilight] Stopped {Count} in-process player(s) for session {SessionId}", players.Count, sessionId);
+        }
     }
 }

@@ -197,7 +197,10 @@ public class AmbilightExtractorService
             {
                 item.ExtractionStatus = "completed";
                 item.ExtractionError = null;
-                _logger.LogInformation("[Ambilight] Extraction completed for {ItemName}", item.Name);
+                if (_config.Debug)
+                {
+                    _logger.LogInformation("[Ambilight] Extraction completed for {ItemName}", item.Name);
+                }
             }
             else
             {
