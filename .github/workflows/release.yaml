@@ -1,0 +1,64 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*.*'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+    
+    - name: Get version from tag
+      id: version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+    
+    - name: Restore dependencies
+      run: dotnet restore
+    
+    - name: Build
+      run: dotnet build --no-restore --configuration Release
+    
+    - name: Create release package
+      run: |
+        mkdir -p release/Jellyfin.Plugin.Ambilight
+        cp bin/Release/net8.0/Jellyfin.Plugin.Ambilight.dll release/Jellyfin.Plugin.Ambilight/
+        cp bin/Release/net8.0/Jellyfin.Plugin.Ambilight.pdb release/Jellyfin.Plugin.Ambilight/ || true
+        cd release
+        zip -r jellyfin-plugin-ambilight_${{ steps.version.outputs.VERSION }}.zip Jellyfin.Plugin.Ambilight
+    
+    - name: Calculate checksum
+      id: checksum
+      run: |
+        cd release
+        CHECKSUM=$(md5sum jellyfin-plugin-ambilight_${{ steps.version.outputs.VERSION }}.zip | awk '{print $1}')
+        echo "CHECKSUM=$CHECKSUM" >> $GITHUB_OUTPUT
+        echo "Checksum: $CHECKSUM"
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: release/jellyfin-plugin-ambilight_${{ steps.version.outputs.VERSION }}.zip
+        body: |
+          ## Jellyfin Ambilight Plugin v${{ steps.version.outputs.VERSION }}
+          
+          **Installation:**
+          1. Download the `.zip` file below
+          2. Extract it to your Jellyfin plugins folder
+          3. Restart Jellyfin
+          
+          **MD5 Checksum:** `${{ steps.checksum.outputs.CHECKSUM }}`
+          
+          See [INSTALLATION.md](https://github.com/gabrielprat/jellyfin-ambilight/blob/master/INSTALLATION.md) for detailed instructions.
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
