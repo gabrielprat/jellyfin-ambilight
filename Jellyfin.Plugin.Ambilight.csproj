@@ -31,4 +31,11 @@
     <EmbeddedResource Include="Binaries\osx-x64\ambilight-extractor" Condition="Exists('Binaries\osx-x64\ambilight-extractor')" />
     <EmbeddedResource Include="Binaries\osx-arm64\ambilight-extractor" Condition="Exists('Binaries\osx-arm64\ambilight-extractor')" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- Copy plugin icon to output directory so Jellyfin can display it -->
+    <None Include="docs\thumb.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 </Project>
