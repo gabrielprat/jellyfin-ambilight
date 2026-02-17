@@ -35,6 +35,8 @@ public class AmbilightEntryPoint : IHostedService
     private CancellationTokenSource? _cts;
 
     public static AmbilightEntryPoint? Instance { get; private set; }
+    
+    public AmbilightStorageService? Storage => _storage;
 
     public AmbilightEntryPoint(
         ILogger<AmbilightEntryPoint> logger,
