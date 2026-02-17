@@ -1482,75 +1482,32 @@
                     return;
                 }
 
-                if (!confirm('Extract ambilight data for ' + pending.length + ' videos? They will be queued and processed one at a time.')) {
+                if (!confirm('Extract ambilight data for ' + pending.length + ' videos? They will be processed sequentially in the background.')) {
                     return;
                 }
 
-                showToast('Queued ' + pending.length + ' videos for extraction');
+                try {
+                    // Call the server-side batch extraction endpoint
+                    const response = await fetch('/Ambilight/ExtractAllPending', {
+                        method: 'POST',
+                        credentials: 'include'
+                    });
 
-                // Queue extractions one at a time
-                for (const video of pending) {
-                    try {
-                        // Mark as extracting immediately
-                        extractingIds[video.Id] = true;
-                        if (!video.ambilightStatus) video.ambilightStatus = {};
-                        video.ambilightStatus.ExtractionStatus = 'extracting';
-                        video.ambilightStatus.ExtractionProgress = 0;
-                        video.ambilightStatus.ExtractionFramesCurrent = 0;
-                        video.ambilightStatus.ExtractionFramesTotal = 0;
-                        renderVideoList();
+                    if (response.ok) {
+                        const result = await response.json();
+                        showToast(result.Message || 'Extraction queue started');
                         
-                        // Start extraction
-                        var extractUrl = '/Ambilight/Extract/' + video.Id;
-                        const response = await fetch(extractUrl, {
-                            method: 'POST',
-                            credentials: 'include'
-                        });
+                        // Start polling to track progress
+                        startPolling();
                         
-                        if (!response.ok) {
-                            console.error('Failed to start extraction for:', video.Name);
-                        }
-                        
-                        // Wait for completion before starting next
-                        await waitForExtractionComplete(video.Id);
-                        
-                    } catch (e) {
-                        console.error('Failed to extract:', video.Name, e);
+                        // Refresh the list to show updated status
+                        setTimeout(function() { loadLibrary(); }, 1000);
+                    } else {
+                        throw new Error('Failed to start batch extraction');
                     }
-                }
-
-                showToast('All queued extractions completed');
-                loadLibrary();
-            }
-            
-            async function waitForExtractionComplete(videoId) {
-                // Poll until extraction is complete or failed
-                while (true) {
-                    await new Promise(function(resolve) { setTimeout(resolve, 5000); });
-                    
-                    try {
-                        const response = await fetch('/Ambilight/Status/' + videoId, {
-                            credentials: 'include'
-                        });
-                        if (response.ok) {
-                            const status = await response.json();
-                            
-                            // Update video status
-                            var video = allVideos.find(function(v) { return v.Id === videoId; });
-                            if (video) {
-                                video.ambilightStatus = status;
-                                renderVideoList();
-                            }
-                            
-                            // Check if done
-                            if (status.ExtractionStatus === 'completed' || status.ExtractionStatus === 'failed') {
-                                delete extractingIds[videoId];
-                                return;
-                            }
-                        }
-                    } catch (e) {
-                        console.error('Error checking extraction status:', e);
-                    }
+                } catch (error) {
+                    console.error('Error starting batch extraction:', error);
+                    showToast('Failed to start batch extraction: ' + error.message);
                 }
             }
             
