@@ -71,6 +71,85 @@ public class AmbilightController : ControllerBase
     }
 
     /// <summary>
+    /// Gets ambilight extraction status for multiple items in a single batch request.
+    /// </summary>
+    /// <param name="itemIds">Array of item IDs (GUIDs).</param>
+    /// <returns>Dictionary mapping item IDs to their extraction status.</returns>
+    [HttpPost("Status/Batch")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public ActionResult<Dictionary<string, AmbilightStatusResponse>> GetBatchStatus([FromBody] string[] itemIds)
+    {
+        try
+        {
+            var libraryManager = GetLibraryManager();
+            if (libraryManager == null)
+            {
+                return BadRequest(new { error = "LibraryManager not available" });
+            }
+
+            var config = Plugin.Instance?.Configuration;
+            var dataFolder = string.IsNullOrWhiteSpace(config?.AmbilightDataFolder) ? "/data/ambilight" : config!.AmbilightDataFolder.Trim();
+            var entryPoint = AmbilightEntryPoint.Instance;
+            var results = new Dictionary<string, AmbilightStatusResponse>();
+
+            foreach (var itemId in itemIds)
+            {
+                if (string.IsNullOrWhiteSpace(itemId) || !Guid.TryParse(itemId, out var guid))
+                {
+                    continue; // Skip invalid IDs
+                }
+
+                var item = libraryManager.GetItemById(guid);
+                if (item == null)
+                {
+                    continue; // Skip items that don't exist
+                }
+
+                var binPath = Path.Combine(dataFolder, guid.ToString("N") + ".bin");
+                string? extractionStatus = null;
+                int extractionProgress = 0;
+                ulong extractionFramesCurrent = 0;
+                ulong extractionFramesTotal = 0;
+
+                if (entryPoint?.Storage != null)
+                {
+                    var ambiItem = entryPoint.Storage.GetItem(guid.ToString("N"));
+                    if (ambiItem != null)
+                    {
+                        extractionStatus = ambiItem.ExtractionStatus;
+                        extractionProgress = ambiItem.ExtractionProgress;
+                        extractionFramesCurrent = ambiItem.ExtractionFramesCurrent;
+                        extractionFramesTotal = ambiItem.ExtractionFramesTotal;
+                    }
+                }
+
+                results[itemId] = new AmbilightStatusResponse
+                {
+                    ItemId = guid,
+                    ItemName = item.Name,
+                    HasBinary = System.IO.File.Exists(binPath),
+                    BinaryPath = binPath,
+                    BinarySize = System.IO.File.Exists(binPath) ? new FileInfo(binPath).Length : 0,
+                    ExtractionStatus = extractionStatus,
+                    ExtractionProgress = extractionProgress,
+                    ExtractionFramesCurrent = extractionFramesCurrent,
+                    ExtractionFramesTotal = extractionFramesTotal
+                };
+            }
+
+            return Ok(results);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { 
+                error = ex.Message, 
+                type = ex.GetType().Name
+            });
+        }
+    }
+
+    /// <summary>
     /// Gets ambilight extraction status for a specific item.
     /// </summary>
     /// <param name="itemId">The item ID (GUID, with or without dashes).</param>
@@ -122,13 +201,50 @@ public class AmbilightController : ControllerBase
             var dataFolder = string.IsNullOrWhiteSpace(config?.AmbilightDataFolder) ? "/data/ambilight" : config!.AmbilightDataFolder.Trim();
             var binPath = Path.Combine(dataFolder, guid.ToString("N") + ".bin");
 
+            // Try to get extraction progress from storage
+            var entryPoint = AmbilightEntryPoint.Instance;
+            string? extractionStatus = null;
+            int extractionProgress = 0;
+            ulong extractionFramesCurrent = 0;
+            ulong extractionFramesTotal = 0;
+            
+            if (entryPoint?.Storage != null)
+            {
+                var ambiItem = entryPoint.Storage.GetItem(guid.ToString("N"));
+                if (ambiItem != null)
+                {
+                    extractionStatus = ambiItem.ExtractionStatus;
+                    extractionProgress = ambiItem.ExtractionProgress;
+                    extractionFramesCurrent = ambiItem.ExtractionFramesCurrent;
+                    extractionFramesTotal = ambiItem.ExtractionFramesTotal;
+                    
+                    // Debug logging
+                    if (extractionStatus == "extracting")
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[Ambilight] API Status: Item {item.Name} is extracting at {extractionProgress}% ({extractionFramesCurrent}/{extractionFramesTotal})");
+                    }
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"[Ambilight] API Status: No storage item found for {guid:N}");
+                }
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine("[Ambilight] API Status: Storage not available");
+            }
+
             var status = new AmbilightStatusResponse
             {
                 ItemId = guid,
                 ItemName = item.Name,
                 HasBinary = System.IO.File.Exists(binPath),
                 BinaryPath = binPath,
-                BinarySize = System.IO.File.Exists(binPath) ? new FileInfo(binPath).Length : 0
+                BinarySize = System.IO.File.Exists(binPath) ? new FileInfo(binPath).Length : 0,
+                ExtractionStatus = extractionStatus,
+                ExtractionProgress = extractionProgress,
+                ExtractionFramesCurrent = extractionFramesCurrent,
+                ExtractionFramesTotal = extractionFramesTotal
             };
 
             return Ok(status);
@@ -252,6 +368,10 @@ public class AmbilightStatusResponse
     public bool HasBinary { get; set; }
     public string? BinaryPath { get; set; }
     public long BinarySize { get; set; }
+    public string? ExtractionStatus { get; set; }
+    public int ExtractionProgress { get; set; }
+    public ulong ExtractionFramesCurrent { get; set; }
+    public ulong ExtractionFramesTotal { get; set; }
 }
 
 public class AmbilightExtractResponse
