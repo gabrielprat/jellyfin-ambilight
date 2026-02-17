@@ -132,24 +132,9 @@ This document outlines planned improvements for a next-generation AMb3 binary fo
 
 ---
 
-### 9. Multi-Resolution / Multi-Quality Storage
-**Rationale**: Users have different LED strip configurations (50, 100, 150, 200+ LEDs). Currently requires re-extraction for each setup.
-
-**Solution**:
-- Store multiple LED count versions in same file
-  - Example: 150 LEDs (full detail), 100 LEDs, 50 LEDs (lower detail)
-- Player selects appropriate version based on actual LED strip configuration
-- Shared keyframes reduce redundancy
-- Optional: store only highest resolution, player downsamples on-the-fly
-
-**Benefits**: 
-- One extraction works for multiple LED setups
-- Easy to switch LED configurations without re-extraction
-- Library sharing between users with different hardware
-
 ---
 
-### 10. Color Space Metadata
+### 9. Color Space Metadata
 **Problem**: HDR/SDR, Rec.709/Rec.2020 videos have different color characteristics; current format ignores this.
 
 **Solution**:
@@ -168,7 +153,7 @@ This document outlines planned improvements for a next-generation AMb3 binary fo
 
 ---
 
-### 11. Smooth Transition Hints
+### 10. Smooth Transition Hints
 **Problem**: Temporal smoothing currently happens during playback with fixed parameters; not optimal for all content.
 
 **Solution**:
@@ -188,7 +173,7 @@ This document outlines planned improvements for a next-generation AMb3 binary fo
 
 ---
 
-### 12. Brightness/Adaptive Optimization
+### 11. Brightness/Adaptive Optimization
 **Rationale**: Very dark scenes use less WLED network bandwidth and can be optimized differently.
 
 **Solution**:
@@ -207,7 +192,7 @@ This document outlines planned improvements for a next-generation AMb3 binary fo
 
 ---
 
-### 13. Streaming-Friendly Chunks
+### 12. Streaming-Friendly Chunks
 **Problem**: Current format requires loading entire file into memory; impractical for embedded players or very long videos.
 
 **Solution**:
@@ -227,7 +212,7 @@ This document outlines planned improvements for a next-generation AMb3 binary fo
 
 ---
 
-### 14. Error Correction / Resilience
+### 13. Error Correction / Resilience
 **Problem**: File corruption from disk errors, incomplete writes, or network transfers breaks entire playback.
 
 **Solution**:
@@ -246,7 +231,7 @@ This document outlines planned improvements for a next-generation AMb3 binary fo
 
 ---
 
-### 15. Variable Frame Rate (VFR) Explicit Support
+### 14. Variable Frame Rate (VFR) Explicit Support
 **Problem**: VFR videos are common in screen recordings, anime, some streaming content. Current constant frame rate assumption causes sync drift.
 
 **Solution**:
