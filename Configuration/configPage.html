@@ -3,6 +3,12 @@
 <head>
     <meta charset="utf-8">
     <title>Ambilight</title>
+    <style>
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+    </style>
 </head>
 <body>
     <div id="AmbilightConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-select,emby-checkbox">
@@ -51,6 +57,19 @@
                         <select id="ExcludedLibraries" is="emby-select" class="emby-select-withcolor emby-select" multiple>
                         </select>
                         <div class="fieldDescription">Libraries to skip when extracting ambilight data.</div>
+                    </div>
+
+                    <div class="selectContainer">
+                        <label class="selectLabel" for="HardwareAcceleration">Hardware acceleration</label>
+                        <select is="emby-select" id="HardwareAcceleration" class="emby-select-withcolor emby-select">
+                            <option value="auto">Auto (Recommended)</option>
+                            <option value="none">None (CPU only)</option>
+                            <option value="vaapi">VAAPI (Intel/AMD on Linux)</option>
+                            <option value="qsv">Intel Quick Sync</option>
+                            <option value="cuda">NVIDIA CUDA</option>
+                            <option value="videotoolbox">VideoToolbox (Apple Silicon/macOS)</option>
+                        </select>
+                        <div class="fieldDescription">Hardware-accelerated video decoding for faster extraction. 'Auto' uses CPU decoding with automatic fallback - most compatible. Select specific hardware only if you know your system supports it.</div>
                     </div>
 
                     <h3 style="margin-top: 2em; margin-bottom: 1em; font-size: 1.1em; font-weight: 500;">Extraction LED Configuration</h3>
@@ -306,7 +325,8 @@
                     ApiClient.getPluginConfiguration(AmbilightConfig.pluginUniqueId).then(function (config) {
                         AmbilightConfig.currentConfig = config;
                         document.querySelector('#ExtractNewlyAddedItems').checked = config.ExtractNewlyAddedItems !== false;
-                        document.querySelector('#ExtractionPriority').value = config.ExtractionPriority;
+                        document.querySelector('#ExtractionPriority').value = config.ExtractionPriority || 'newest_first';
+                        document.querySelector('#HardwareAcceleration').value = config.HardwareAcceleration || 'auto';
                         document.querySelector('#AmbilightDataFolder').value = config.AmbilightDataFolder || '/data/ambilight';
                         document.querySelector('#AmbilightSmoothSeconds').value = (config.AmbilightSmoothSeconds != null ? config.AmbilightSmoothSeconds : 0.12);
                         document.querySelector('#Debug').checked = config.Debug === true;
@@ -346,6 +366,7 @@
                 ApiClient.getPluginConfiguration(AmbilightConfig.pluginUniqueId).then(function (config) {
                     config.ExtractNewlyAddedItems = document.querySelector('#ExtractNewlyAddedItems').checked;
                     config.ExtractionPriority = document.querySelector('#ExtractionPriority').value;
+                    config.HardwareAcceleration = document.querySelector('#HardwareAcceleration').value || 'auto';
                     config.AmbilightDataFolder = document.querySelector('#AmbilightDataFolder').value || '/data/ambilight';
                     config.AmbilightSmoothSeconds = parseFloat(document.querySelector('#AmbilightSmoothSeconds').value || '0.12');
                     config.Debug = document.querySelector('#Debug').checked === true;
@@ -501,12 +522,19 @@
                 });
             })();
 
-            // ===== MANAGER TAB LOGIC =====
+            // ===== MANAGER TAB LOGIC ===== v1.3.0 - Batch API
+            console.log('[Ambilight] Config v1.3.0 - Batch API Implementation');
+            
             let allVideos = [];
             let currentFilter = '';
             let currentStatusFilter = 'all';
             let currentTypeFilter = 'both';
             let extractingIds = {};
+            let pollingInterval = null;
+            
+            // Track expanded/collapsed state to preserve user's tree view
+            let expandedSeries = new Set();  // Series IDs that are expanded
+            let expandedSeasons = new Set(); // Season IDs (seriesId-seasonNum) that are expanded
 
             function showToast(msg) {
                 if (typeof require === 'function') {
@@ -765,6 +793,7 @@
                 if (tab === 'settings') {
                     document.getElementById('settingsTab').style.display = 'block';
                     document.getElementById('managerTab').style.display = 'none';
+                    stopPolling(); // Stop polling when leaving manager tab
                 } else {
                     document.getElementById('settingsTab').style.display = 'none';
                     document.getElementById('managerTab').style.display = 'block';
@@ -827,25 +856,54 @@
 
                     console.log('[Ambilight] Total videos loaded:', allVideos.length);
 
-                    const statusPromises = allVideos.map(async (video) => {
-                        try {
-                            // Use plain string concatenation to avoid any templating quirks
-                            var statusUrl = '/Ambilight/Status/' + video.Id;
-                            const response = await fetch(statusUrl, { credentials: 'include' });
-                            if (response.ok) {
-                                video.ambilightStatus = await response.json();
-                            } else {
-                                video.ambilightStatus = { HasBinary: false, BinarySize: 0 };
+                    // ===== BATCH API REQUEST - v1.3.0 =====
+                    console.log('[Ambilight] Fetching status for', allVideos.length, 'videos in batch');
+                    
+                    try {
+                        const videoIds = allVideos.map(function(v) { return v.Id; });
+                        const response = await fetch('/Ambilight/Status/Batch', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'include',
+                            body: JSON.stringify(videoIds)
+                        });
+                        
+                        if (response.ok) {
+                            const statuses = await response.json();
+                            
+                            allVideos.forEach(function(video) {
+                                if (statuses[video.Id]) {
+                                    video.ambilightStatus = statuses[video.Id];
+                                    
+                                    // Track extracting videos for polling
+                                    if (video.ambilightStatus.ExtractionStatus === 'extracting') {
+                                        extractingIds[video.Id] = true;
+                                    }
+                                } else {
+                                    video.ambilightStatus = { HasBinary: false, BinarySize: 0, ExtractionStatus: 'pending' };
+                                }
+                            });
+                            
+                            console.log('[Ambilight] Batch status loaded successfully, extracting videos:', Object.keys(extractingIds).length);
+                            
+                            // Start polling if there are extracting videos
+                            if (Object.keys(extractingIds).length > 0) {
+                                startPolling();
                             }
-                        } catch (e) {
-                            video.ambilightStatus = { HasBinary: false, BinarySize: 0, error: true };
+                        } else {
+                            console.error('[Ambilight] Batch status fetch failed:', response.status);
+                            allVideos.forEach(function(video) {
+                                video.ambilightStatus = { HasBinary: false, BinarySize: 0, ExtractionStatus: 'pending' };
+                            });
                         }
-                        return video;
-                    });
+                    } catch (e) {
+                        console.error('[Ambilight] Batch status error:', e);
+                        allVideos.forEach(function(video) {
+                            video.ambilightStatus = { HasBinary: false, BinarySize: 0, ExtractionStatus: 'pending' };
+                        });
+                    }
 
-                    await Promise.all(statusPromises);
-
-                    console.log('[Ambilight] All videos with status loaded:', allVideos.length);
+                    console.log('[Ambilight] All videos loaded:', allVideos.length);
 
                     // Sort by DateCreated, newest first
                     allVideos.sort(function(a, b) {
@@ -880,7 +938,7 @@
 
             function updateStatistics() {
                 const extracted = allVideos.filter(v => v.ambilightStatus?.HasBinary).length;
-                const failed = allVideos.filter(v => v.ambilightStatus?.error).length;
+                const failed = allVideos.filter(v => v.ambilightStatus?.ExtractionStatus === 'failed').length;
                 const pending = allVideos.length - extracted - failed;
 
                 document.getElementById('statsExtracted').textContent = extracted;
@@ -1042,10 +1100,8 @@
                         seriesRow.style.fontSize = '1.05em';
                         
                         var seriesCollapsedId = 'series-' + seriesId;
-                        // Default to collapsed if not set in localStorage
-                        var storedState = localStorage.getItem(seriesCollapsedId);
-                        var isSeriesCollapsed = storedState === null ? true : storedState === 'collapsed';
-                        
+                        // Use session state (not localStorage for persistence)
+                        var isSeriesCollapsed = !expandedSeries.has(seriesId);
                         var seriesExpandIcon = isSeriesCollapsed ? 'chevron_right' : 'expand_more';
                         var seriesStatusHtml = '<span class="material-icons" style="color:' + seriesStatusColor + ';vertical-align:middle;font-size:1.1em;margin-left:0.5em;">' + seriesStatusIcon + '</span><span style="color:' + seriesStatusColor + ';margin-left:0.3em;font-weight:normal;font-size:0.95em;">' + seriesStatusText + '</span>';
                         var seriesStatsHtml = '<span style="font-weight: normal; font-size: 0.9em; opacity: 0.8;"> (' + seasonKeys.length + ' seasons, ' + allEpisodes.length + ' episodes: ' + seriesExtractedCount + ' extracted, ' + seriesPendingCount + ' pending' + (seriesFailedCount > 0 ? ', ' + seriesFailedCount + ' failed' : '') + ')</span>';
@@ -1096,8 +1152,8 @@
                             seasonRow.setAttribute('data-parent-series', seriesCollapsedId);
                             
                             var seasonId = 'season-' + seriesId + '-' + seasonNumber;
-                            var isSeasonCollapsed = localStorage.getItem(seasonId) === 'collapsed';
-                            
+                            // Use session state (not localStorage for persistence)
+                            var isSeasonCollapsed = !expandedSeasons.has(seasonId);
                             var seasonExpandIcon = isSeasonCollapsed ? 'chevron_right' : 'expand_more';
                             var seasonStatusHtml = '<span class="material-icons" style="color:' + seasonStatusColor + ';vertical-align:middle;font-size:1em;margin-left:0.5em;">' + seasonStatusIcon + '</span><span style="color:' + seasonStatusColor + ';margin-left:0.3em;font-weight:normal;font-size:0.9em;">' + seasonStatusText + '</span>';
                             var seasonStatsHtml = '<span style="font-weight: normal; font-size: 0.9em; opacity: 0.8;"> (' + episodes.length + ' episodes: ' + extractedCount + ' extracted, ' + pendingCount + ' pending' + (failedCount > 0 ? ', ' + failedCount + ' failed' : '') + ')</span>';
@@ -1155,12 +1211,12 @@
                             }
                         });
 
-                        // Save state
+                        // Save state in memory only (not localStorage)
                         this.setAttribute('data-collapsed', newCollapsed ? 'true' : 'false');
                         if (newCollapsed) {
-                            localStorage.setItem(seriesId, 'collapsed');
+                            expandedSeries.delete(seriesId.replace('series-', ''));
                         } else {
-                            localStorage.removeItem(seriesId);
+                            expandedSeries.add(seriesId.replace('series-', ''));
                         }
                     });
                 });
@@ -1181,12 +1237,12 @@
                             row.style.display = newCollapsed ? 'none' : '';
                         });
 
-                        // Save state
+                        // Save state in memory only (not localStorage)
                         this.setAttribute('data-collapsed', newCollapsed ? 'true' : 'false');
                         if (newCollapsed) {
-                            localStorage.setItem(seasonId, 'collapsed');
+                            expandedSeasons.delete(seasonId);
                         } else {
-                            localStorage.removeItem(seasonId);
+                            expandedSeasons.add(seasonId);
                         }
                     });
                 });
@@ -1212,14 +1268,30 @@
                 var statusIcon = 'pending';
                 var statusText = 'Pending';
                 var statusColor = '#fbbf24';
-                if (status && status.error) {
+                var statusHtml = '';
+                
+                // Check extraction status properly
+                if (status && status.ExtractionStatus === 'extracting') {
+                    statusIcon = 'sync';
+                    statusText = 'Extracting';
+                    statusColor = '#3b82f6';
+                    var framesCurrent = status.ExtractionFramesCurrent || 0;
+                    var framesTotal = status.ExtractionFramesTotal || 0;
+                    var progress = status.ExtractionProgress || 0;
+                    var framesText = framesTotal > 0 ? framesCurrent.toLocaleString() + ' / ' + framesTotal.toLocaleString() : 'Starting...';
+                    statusHtml = '<span class="material-icons" style="color:' + statusColor + ';vertical-align:middle;font-size:1.2em;animation:spin 2s linear infinite;">' + statusIcon + '</span> ' + statusText + ' (' + framesText + ')';
+                } else if (status && status.ExtractionStatus === 'failed') {
                     statusIcon = 'error';
                     statusText = 'Failed';
                     statusColor = '#ef4444';
+                    statusHtml = '<span class="material-icons" style="color:' + statusColor + ';vertical-align:middle;font-size:1.2em;">' + statusIcon + '</span> ' + statusText;
                 } else if (status && status.HasBinary) {
                     statusIcon = 'check_circle';
                     statusText = 'Extracted';
                     statusColor = '#4ade80';
+                    statusHtml = '<span class="material-icons" style="color:' + statusColor + ';vertical-align:middle;font-size:1.2em;">' + statusIcon + '</span> ' + statusText;
+                } else {
+                    statusHtml = '<span class="material-icons" style="color:' + statusColor + ';vertical-align:middle;font-size:1.2em;">' + statusIcon + '</span> ' + statusText;
                 }
                 var sizeText = '-';
                 if (status && status.HasBinary && status.BinarySize != null) {
@@ -1263,14 +1335,16 @@
                 var metaText = metaParts.length ? metaParts.join(' • ') : '';
                 var videoId = video.Id || '';
                 var isExtracted = !!(status && status.HasBinary);
-                var isFailed = !!(status && status.error);
-                var isExtracting = !!extractingIds[videoId] && !isExtracted && !isFailed;
+                var isFailed = !!(status && status.ExtractionStatus === 'failed');
+                var isExtracting = !!(status && status.ExtractionStatus === 'extracting');
                 var btnHtml = '';
 
                 if (isExtracting) {
-                    statusIcon = 'hourglass_top';
-                    statusText = 'Extracting...';
-                    statusColor = '#38bdf8';
+                    // Override statusHtml for extracting status with frame info
+                    var framesCurrent = status.ExtractionFramesCurrent || 0;
+                    var framesTotal = status.ExtractionFramesTotal || 0;
+                    var framesText = framesTotal > 0 ? framesCurrent.toLocaleString() + ' / ' + framesTotal.toLocaleString() : 'Starting...';
+                    statusHtml = '<span class="material-icons" style="color:#3b82f6;vertical-align:middle;font-size:1.2em;animation:spin 2s linear infinite;">sync</span> Extracting (' + framesText + ')';
                     btnHtml = '<button is="emby-button" class="emby-button raised btnExtractVideo" disabled>Extracting...</button>';
                 } else {
                     var btnClass = isExtracted
@@ -1327,7 +1401,7 @@
 
                 row.innerHTML = '<td>' + titleCellHtml + '</td>' +
                     '<td>' + addedDateText + '</td>' +
-                    '<td><span class="material-icons" style="color:' + statusColor + ';vertical-align:middle;font-size:1.2em;">' + statusIcon + '</span> ' + statusText + '</td>' +
+                    '<td>' + statusHtml + '</td>' +
                     '<td>' + sizeText + '</td>' +
                     '<td>' + btnHtml + '</td>';
 
@@ -1347,8 +1421,21 @@
 
                     if (response.ok) {
                         extractingIds[itemId] = true;
+                        
+                        // Update video status in memory immediately
+                        var video = allVideos.find(function(v) { return v.Id === itemId; });
+                        if (video) {
+                            if (!video.ambilightStatus) video.ambilightStatus = {};
+                            video.ambilightStatus.ExtractionStatus = 'extracting';
+                            video.ambilightStatus.ExtractionProgress = 0;
+                            video.ambilightStatus.ExtractionFramesCurrent = 0;
+                            video.ambilightStatus.ExtractionFramesTotal = 0;
+                        }
+                        
+                        renderVideoList();
+                        startPolling();
                         showToast('Extraction started for: ' + itemName);
-                        setTimeout(function() { loadLibrary(); }, 2000);
+                        setTimeout(function() { pollProgress(); }, 500);
                     } else {
                         throw new Error('Failed to start extraction');
                     }
@@ -1386,35 +1473,163 @@
             }
 
             async function extractAllPending() {
-                const pending = allVideos.filter(function(v) { return !(v.ambilightStatus && (v.ambilightStatus.HasBinary || v.ambilightStatus.error)); });
+                const pending = allVideos.filter(function(v) { 
+                    return !v.ambilightStatus?.HasBinary && v.ambilightStatus?.ExtractionStatus !== 'failed';
+                });
 
                 if (pending.length === 0) {
                     showToast('No pending videos to extract');
                     return;
                 }
 
-                if (!confirm('Extract ambilight data for ' + pending.length + ' videos?')) {
+                if (!confirm('Extract ambilight data for ' + pending.length + ' videos? They will be queued and processed one at a time.')) {
                     return;
                 }
 
-                Dashboard.showLoadingMsg();
+                showToast('Queued ' + pending.length + ' videos for extraction');
 
+                // Queue extractions one at a time
                 for (const video of pending) {
-                        try {
-                            var extractUrl = '/Ambilight/Extract/' + (video.Id || '');
-                            await fetch(extractUrl, {
-                                method: 'POST',
-                                credentials: 'include'
-                            });
+                    try {
+                        // Mark as extracting immediately
+                        extractingIds[video.Id] = true;
+                        if (!video.ambilightStatus) video.ambilightStatus = {};
+                        video.ambilightStatus.ExtractionStatus = 'extracting';
+                        video.ambilightStatus.ExtractionProgress = 0;
+                        video.ambilightStatus.ExtractionFramesCurrent = 0;
+                        video.ambilightStatus.ExtractionFramesTotal = 0;
+                        renderVideoList();
+                        
+                        // Start extraction
+                        var extractUrl = '/Ambilight/Extract/' + video.Id;
+                        const response = await fetch(extractUrl, {
+                            method: 'POST',
+                            credentials: 'include'
+                        });
+                        
+                        if (!response.ok) {
+                            console.error('Failed to start extraction for:', video.Name);
+                        }
+                        
+                        // Wait for completion before starting next
+                        await waitForExtractionComplete(video.Id);
+                        
                     } catch (e) {
                         console.error('Failed to extract:', video.Name, e);
                     }
                 }
 
-                Dashboard.hideLoadingMsg();
-                showToast('Started extraction for ' + pending.length + ' videos');
-
-                setTimeout(function() { loadLibrary(); }, 3000);
+                showToast('All queued extractions completed');
+                loadLibrary();
+            }
+            
+            async function waitForExtractionComplete(videoId) {
+                // Poll until extraction is complete or failed
+                while (true) {
+                    await new Promise(function(resolve) { setTimeout(resolve, 5000); });
+                    
+                    try {
+                        const response = await fetch('/Ambilight/Status/' + videoId, {
+                            credentials: 'include'
+                        });
+                        if (response.ok) {
+                            const status = await response.json();
+                            
+                            // Update video status
+                            var video = allVideos.find(function(v) { return v.Id === videoId; });
+                            if (video) {
+                                video.ambilightStatus = status;
+                                renderVideoList();
+                            }
+                            
+                            // Check if done
+                            if (status.ExtractionStatus === 'completed' || status.ExtractionStatus === 'failed') {
+                                delete extractingIds[videoId];
+                                return;
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Error checking extraction status:', e);
+                    }
+                }
+            }
+            
+            function startPolling() {
+                if (pollingInterval) return;
+                console.log('[Ambilight] Starting progress polling');
+                pollingInterval = setInterval(pollProgress, 5000);
+            }
+            
+            function stopPolling() {
+                if (pollingInterval) {
+                    console.log('[Ambilight] Stopping progress polling');
+                    clearInterval(pollingInterval);
+                    pollingInterval = null;
+                }
+            }
+            
+            async function pollProgress() {
+                var extractingVideoIds = Object.keys(extractingIds);
+                if (extractingVideoIds.length === 0) {
+                    console.log('[Ambilight] No videos extracting, skipping poll');
+                    stopPolling();
+                    return;
+                }
+                
+                console.log('[Ambilight] Polling progress for', extractingVideoIds.length, 'videos');
+                
+                try {
+                    const response = await fetch('/Ambilight/Status/Batch', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify(extractingVideoIds)
+                    });
+                    
+                    if (!response.ok) {
+                        console.error('[Ambilight] Batch poll failed:', response.status);
+                        return;
+                    }
+                    
+                    const statuses = await response.json();
+                    var completed = [];
+                    
+                    // Update video statuses
+                    for (var videoId in statuses) {
+                        var status = statuses[videoId];
+                        var video = allVideos.find(function(v) { return v.Id === videoId; });
+                        if (video) {
+                            video.ambilightStatus = status;
+                            
+                            console.log('[Ambilight] Progress for', video.Name, ':', 
+                                status.ExtractionFramesCurrent, '/', status.ExtractionFramesTotal,
+                                'Status:', status.ExtractionStatus);
+                            
+                            // Check if extraction is complete or failed
+                            if (status.ExtractionStatus === 'completed' || status.ExtractionStatus === 'failed') {
+                                completed.push(videoId);
+                            }
+                        }
+                    }
+                    
+                    // Remove completed videos from tracking
+                    completed.forEach(function(videoId) {
+                        console.log('[Ambilight] Removing completed video from tracking:', videoId);
+                        delete extractingIds[videoId];
+                    });
+                    
+                    // Re-render to show updated progress
+                    renderVideoList();
+                    updateStatistics();
+                    
+                    // Stop polling if no more videos are extracting
+                    if (Object.keys(extractingIds).length === 0) {
+                        console.log('[Ambilight] All extractions complete, stopping poll');
+                        stopPolling();
+                    }
+                } catch (e) {
+                    console.error('[Ambilight] Batch poll error:', e);
+                }
             }
 
             // Event handlers for manager tab

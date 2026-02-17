@@ -158,8 +158,11 @@ public sealed class AmbilightInProcessPlayer : IDisposable
             }
             int totalTgt = tgtTop + tgtRight + tgtBottom + tgtLeft;
 
-            _logger.LogInformation("[Ambilight] Playing {Path} → {Host}:{Port} (src {Src} LEDs → tgt {Tgt} LEDs, rgbw={Rgbw})",
-                binPath, mapping.Host, mapping.Port, totalSrc, totalTgt, rgbw);
+            if (_config.Debug)
+            {
+                _logger.LogInformation("[Ambilight] Playing {Path} → {Host}:{Port} (src {Src} LEDs → tgt {Tgt} LEDs, rgbw={Rgbw})",
+                    binPath, mapping.Host, mapping.Port, totalSrc, totalTgt, rgbw);
+            }
 
             var frames = new List<byte[]>();
             var timestampsUs = new List<ulong>();

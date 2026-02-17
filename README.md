@@ -1,6 +1,6 @@
 # Jellyfin Ambilight Plugin
 
-**Version:** 1.0.0
+**Version:** 1.3.0
 
 Transform your Jellyfin viewing experience with synchronized ambient lighting! This plugin automatically creates immersive ambilight effects for your movies and TV shows by controlling WLED-compatible LED strips.
 
@@ -89,6 +89,7 @@ Controls how and when the plugin processes videos:
 - **Extract newly added items** - Automatically extract ambilight data when new videos are added to your libraries
 - **Extraction priority** - Order in which videos are processed (newest first, oldest first, alphabetical, or movies newest first)
 - **Excluded libraries** - Select which Jellyfin libraries to skip during extraction
+- **Hardware acceleration** - Choose hardware-accelerated video decoding for faster extraction. 'Auto' (recommended) uses CPU decoding - most compatible. Select specific hardware (VAAPI, Intel Quick Sync, NVIDIA CUDA, VideoToolbox) only if your system supports it
 
 **Extraction LED Configuration:**
 
@@ -177,8 +178,10 @@ The plugin looks for:
 #### Extraction Manager Page
 1. Go to **Jellyfin Dashboard** → **Plugins** → **Ambilight**
 2. Click on the **Manager** tab
-3. View all videos and their extraction status
-4. Click "Extract" on specific items or "Extract All"
+3. View all videos and their extraction status with real-time progress bars
+4. Click "Extract" on specific items or "Extract All Pending"
+
+**Note:** The "Extract All Pending" feature processes videos sequentially (one at a time) to avoid overloading your system and ensure efficient resource usage.
 
 ## Troubleshooting
 

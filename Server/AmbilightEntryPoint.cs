@@ -35,6 +35,8 @@ public class AmbilightEntryPoint : IHostedService
     private CancellationTokenSource? _cts;
 
     public static AmbilightEntryPoint? Instance { get; private set; }
+    
+    public AmbilightStorageService? Storage => _storage;
 
     public AmbilightEntryPoint(
         ILogger<AmbilightEntryPoint> logger,
@@ -77,6 +79,7 @@ public class AmbilightEntryPoint : IHostedService
         // Subscribe to library scan events instead of polling
         _libraryManager.ItemAdded += OnItemAdded;
         _libraryManager.ItemUpdated += OnItemUpdated;
+        _libraryManager.ItemRemoved += OnItemRemoved;
 
         _logger.LogInformation("[Ambilight] Subscribed to library events");
 
@@ -96,6 +99,7 @@ public class AmbilightEntryPoint : IHostedService
         
         _libraryManager.ItemAdded -= OnItemAdded;
         _libraryManager.ItemUpdated -= OnItemUpdated;
+        _libraryManager.ItemRemoved -= OnItemRemoved;
 
         _cts?.Dispose();
 
@@ -160,7 +164,7 @@ public class AmbilightEntryPoint : IHostedService
 
     private void OnItemAdded(object? sender, ItemChangeEventArgs e)
     {
-        if (_extractor == null || e.Item.Path == null) return;
+        if (_extractor == null || _storage == null || e.Item.Path == null) return;
         
         // Check if auto-extraction is enabled
         if (!_config.ExtractNewlyAddedItems)
@@ -175,27 +179,77 @@ public class AmbilightEntryPoint : IHostedService
         // Only process movies and episodes
         if (e.Item is not MediaBrowser.Controller.Entities.Movies.Movie && 
             e.Item is not MediaBrowser.Controller.Entities.TV.Episode) return;
-
-        _logger.LogInformation("[Ambilight] New item added: {ItemName}", e.Item.Name);
         
-        // Queue extraction in background
+        // Check if item is from an excluded library
+        var libraryId = GetLibraryId(e.Item);
+        var excluded = _config.ExcludedLibraryIds ?? new List<string>();
+        var normalizedExcluded = excluded.Select(id => id.Replace("-", string.Empty).ToLowerInvariant()).ToHashSet();
+        
+        if (!string.IsNullOrEmpty(libraryId) && normalizedExcluded.Count > 0)
+        {
+            var normalizedLibraryId = libraryId.Replace("-", string.Empty).ToLowerInvariant();
+            if (normalizedExcluded.Contains(normalizedLibraryId))
+            {
+                if (_config.Debug)
+                {
+                    _logger.LogDebug("[Ambilight] Item {ItemName} is from excluded library, skipping extraction", e.Item.Name);
+                }
+                return;
+            }
+        }
+
+        if (_config.Debug)
+        {
+            _logger.LogInformation("[Ambilight] New item added: {ItemName} - queueing for extraction", e.Item.Name);
+        }
+        
+        // Queue extraction in background - extract ONLY the new item, not all pending items
         _ = Task.Run(async () =>
         {
             try
             {
-                _extractor.SyncLibraryFromJellyfin();
-                var items = _extractor.GetItemsNeedingExtraction().ToList();
+                // Create or update the ambilight item for this specific new item
+                var itemIdStr = e.Item.Id.ToString("N");
+                var ambiItem = _storage.GetItem(itemIdStr);
                 
-                foreach (var item in items)
+                if (ambiItem == null)
                 {
-                    await _extractor.RunExtractorForItemAsync(item, _cts?.Token ?? CancellationToken.None);
+                    ambiItem = new Services.AmbilightItem
+                    {
+                        Id = itemIdStr,
+                        LibraryId = e.Item.ParentId.ToString("N"),
+                        Name = e.Item.Name ?? "Unknown",
+                        Type = e.Item.GetType().Name,
+                        Kind = e.Item.GetType().Name == "Episode" ? "Serie" : (e.Item.GetType().Name == "Movie" ? "Movie" : "Video"),
+                        FilePath = e.Item.Path,
+                        JellyfinDateCreated = e.Item.DateCreated.ToString("O"),
+                        Viewed = false
+                    };
+                    _storage.SaveOrUpdateItem(ambiItem);
+                }
+                
+                // Check if extraction is needed (binary doesn't exist)
+                if (!_storage.BinaryExists(itemIdStr))
+                {
+                    if (_config.Debug)
+                    {
+                        _logger.LogInformation("[Ambilight] Starting extraction for new item: {ItemName}", e.Item.Name);
+                    }
+                    await _extractor.RunExtractorForItemAsync(ambiItem, _cts?.Token ?? CancellationToken.None);
+                }
+                else
+                {
+                    if (_config.Debug)
+                    {
+                        _logger.LogDebug("[Ambilight] Binary already exists for new item: {ItemName}", e.Item.Name);
+                    }
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "[Ambilight] Error extracting new item");
+                _logger.LogError(ex, "[Ambilight] Error extracting new item: {ItemName}", e.Item.Name);
             }
-        });
+        }, _cts?.Token ?? CancellationToken.None);
     }
 
     private void OnItemUpdated(object? sender, ItemChangeEventArgs e)
@@ -293,6 +347,39 @@ public class AmbilightEntryPoint : IHostedService
         };
         
         _playback.OnPlaybackProgress(e.Session, info);
+    }
+
+    /// <summary>
+    /// Gets the library ID for an item by walking up the parent chain.
+    /// Returns the ID in "N" format (without dashes) for consistent comparison.
+    /// </summary>
+    private string? GetLibraryId(MediaBrowser.Controller.Entities.BaseItem item)
+    {
+        var current = item;
+        
+        // Walk up the parent chain until we find a CollectionFolder (library root)
+        while (current != null)
+        {
+            // Check if this is a library root (CollectionFolder)
+            var typeName = current.GetType().Name;
+            if (typeName == "CollectionFolder" || typeName == "UserView")
+            {
+                return current.Id.ToString("N");
+            }
+
+            // Move to parent
+            if (current.ParentId != Guid.Empty)
+            {
+                current = _libraryManager.GetItemById(current.ParentId);
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        // Fallback: use ParentId if we couldn't find a library
+        return item.ParentId != Guid.Empty ? item.ParentId.ToString("N") : null;
     }
 
 }

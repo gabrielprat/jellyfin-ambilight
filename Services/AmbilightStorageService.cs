@@ -16,6 +16,7 @@ public class AmbilightStorageService
 {
     private readonly ILogger<AmbilightStorageService> _logger;
     private readonly PluginConfiguration _config;
+    private readonly Dictionary<string, (ulong current, ulong total)> _extractionProgressCache = new();
 
     public AmbilightStorageService(ILogger<AmbilightStorageService> logger, PluginConfiguration config)
     {
@@ -65,7 +66,27 @@ public class AmbilightStorageService
                 return null;
             }
 
-            return JsonSerializer.Deserialize<AmbilightItem>(json);
+            var item = JsonSerializer.Deserialize<AmbilightItem>(json);
+            
+            // If we have a cached progress for this item, use it instead of disk value
+            if (item != null)
+            {
+                lock (_extractionProgressCache)
+                {
+                    if (_extractionProgressCache.TryGetValue(itemId, out var cachedProgress))
+                    {
+                        item.ExtractionFramesCurrent = cachedProgress.current;
+                        item.ExtractionFramesTotal = cachedProgress.total;
+                        // Also update percentage for backwards compatibility
+                        if (cachedProgress.total > 0)
+                        {
+                            item.ExtractionProgress = (int)Math.Min(99, (cachedProgress.current * 100) / cachedProgress.total);
+                        }
+                    }
+                }
+            }
+            
+            return item;
         }
         catch (Exception ex)
         {
@@ -102,6 +123,24 @@ public class AmbilightStorageService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to write ambilight metadata for item {ItemId}", item.Id);
+        }
+    }
+    
+    public void UpdateExtractionProgress(string itemId, ulong currentFrame, ulong totalFrames)
+    {
+        // Update in-memory cache only - avoid expensive disk I/O on every progress update
+        lock (_extractionProgressCache)
+        {
+            _extractionProgressCache[itemId] = (currentFrame, totalFrames);
+        }
+    }
+    
+    public void ClearExtractionProgress(string itemId)
+    {
+        // Remove from cache when extraction is complete
+        lock (_extractionProgressCache)
+        {
+            _extractionProgressCache.Remove(itemId);
         }
     }
 
@@ -177,6 +216,9 @@ public class AmbilightItem
     public string? ExtractionError { get; set; }
     public int ExtractionAttempts { get; set; }
     public bool Viewed { get; set; }
+    public int ExtractionProgress { get; set; } = 0; // 0-100 percentage (deprecated, use frames)
+    public ulong ExtractionFramesCurrent { get; set; } = 0; // Current frame count
+    public ulong ExtractionFramesTotal { get; set; } = 0; // Total estimated frames
 }
 
 public class StorageStatistics

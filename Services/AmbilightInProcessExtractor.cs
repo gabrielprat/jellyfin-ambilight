@@ -156,7 +156,84 @@ public sealed class AmbilightInProcessExtractor
         return fallbackFps;
     }
 
-    public async Task<bool> ExtractAsync(string videoPath, string outputPath, CancellationToken cancellationToken)
+    private string BuildFfmpegArguments(string videoPath)
+    {
+        var hwaccel = _config.HardwareAcceleration ?? "auto";
+        var baseArgs = "-hide_banner -loglevel error";
+        
+        // Hardware acceleration options
+        // Note: For most modes we keep it simple - just enable hwaccel for decoding
+        // and let ffmpeg handle the format conversion automatically
+        string hwaccelArgs = hwaccel.ToLower() switch
+        {
+            "vaapi" => "-hwaccel vaapi -hwaccel_device /dev/dri/renderD128",
+            "qsv" => "-hwaccel qsv",
+            "cuda" => "-hwaccel cuda",
+            "videotoolbox" => "-hwaccel videotoolbox",
+            "none" => "",
+            _ => "" // "auto" - let ffmpeg auto-detect, but don't force it
+        };
+        
+        // Use simple software filter chain - hardware acceleration is only for decoding
+        // ffmpeg will automatically transfer frames to system memory for filtering
+        string filterChain = $"scale={ExtractWidth}:{ExtractHeight}";
+        
+        return $"{baseArgs} {hwaccelArgs} -i \"{videoPath}\" -vf {filterChain} -pix_fmt rgb24 -f rawvideo pipe:1".Trim();
+    }
+
+    private async Task<float> ProbeVideoDuration(string videoPath, CancellationToken cancellationToken)
+    {
+        const float fallbackDuration = 60.0f; // 1 minute fallback
+
+        try
+        {
+            // Construct ffprobe path from ffmpeg path
+            string ffprobePath;
+            if (Path.IsPathRooted(_ffmpegPath))
+            {
+                var dir = Path.GetDirectoryName(_ffmpegPath);
+                ffprobePath = Path.Combine(dir ?? "/", "ffprobe");
+            }
+            else
+            {
+                ffprobePath = "ffprobe";
+            }
+            
+            // ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "video.mp4"
+            var ffprobe = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = ffprobePath,
+                    Arguments = $"-v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 \"{videoPath}\"",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                }
+            };
+
+            ffprobe.Start();
+            var output = await ffprobe.StandardOutput.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+            await ffprobe.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+
+            if (ffprobe.ExitCode == 0 && !string.IsNullOrWhiteSpace(output))
+            {
+                if (float.TryParse(output.Trim(), out var duration) && duration > 0.0f)
+                {
+                    return duration;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[Ambilight] Extractor: Failed to probe video duration for {Path}", videoPath);
+        }
+
+        return fallbackDuration;
+    }
+
+    public async Task<bool> ExtractAsync(string videoPath, string outputPath, CancellationToken cancellationToken, IProgress<(ulong current, ulong total)>? progress = null)
     {
         if (string.IsNullOrEmpty(videoPath) || !File.Exists(videoPath))
         {
@@ -166,11 +243,14 @@ public sealed class AmbilightInProcessExtractor
 
         try
         {
-            // Probe video to get actual FPS
+            // Probe video to get actual FPS and duration
             float fps = await ProbeVideoFps(videoPath, cancellationToken).ConfigureAwait(false);
+            float duration = await ProbeVideoDuration(videoPath, cancellationToken).ConfigureAwait(false);
+            ulong estimatedFrames = (ulong)(duration * fps);
+            
             if (_config.Debug)
             {
-                _logger.LogInformation("[Ambilight] Extractor: video FPS: {Fps:F3}", fps);
+                _logger.LogInformation("[Ambilight] Extractor: video FPS: {Fps:F3}, duration: {Duration:F1}s, estimated frames: {Frames}", fps, duration, estimatedFrames);
             }
 
             // Prepare header values
@@ -190,13 +270,16 @@ public sealed class AmbilightInProcessExtractor
                 return false;
             }
 
+            // Build ffmpeg arguments with hardware acceleration
+            string ffmpegArgs = BuildFfmpegArguments(videoPath);
+            
             // Start ffmpeg to produce a scaled RGB24 raw video stream.
             var ffmpeg = new Process
             {
                 StartInfo = new ProcessStartInfo
                 {
                     FileName = _ffmpegPath,
-                    Arguments = $"-hide_banner -loglevel error -i \"{videoPath}\" -vf scale={ExtractWidth}:{ExtractHeight} -pix_fmt rgb24 -f rawvideo pipe:1",
+                    Arguments = ffmpegArgs,
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
@@ -205,10 +288,19 @@ public sealed class AmbilightInProcessExtractor
                 }
             };
 
+            Task<string>? stderrTask = null;
+            
             try
             {
-                _logger.LogInformation("[Ambilight] Extractor: starting ffmpeg for {Path}", videoPath);
+                if (_config.Debug)
+                {
+                    _logger.LogInformation("[Ambilight] Extractor: starting ffmpeg for {Path}", videoPath);
+                    _logger.LogInformation("[Ambilight] Extractor: ffmpeg args: {Args}", ffmpegArgs);
+                }
                 ffmpeg.Start();
+                
+                // Capture stderr asynchronously for error reporting
+                stderrTask = ffmpeg.StandardError.ReadToEndAsync(cancellationToken);
             }
             catch (Exception ex)
             {
@@ -265,6 +357,13 @@ public sealed class AmbilightInProcessExtractor
                 writer.Write(zoneColors);
 
                 frameIndex++;
+                
+                // Report progress every 200 frames to avoid overhead
+                if (progress != null && frameIndex % 200 == 0)
+                {
+                    progress.Report((frameIndex, estimatedFrames));
+                }
+                
                 if (_config.Debug && frameIndex % 200 == 0)
                 {
                     _logger.LogInformation("[Ambilight] Extractor: processed {Frames} frames for {Path}", frameIndex, videoPath);
@@ -282,7 +381,28 @@ public sealed class AmbilightInProcessExtractor
 
             if (frameIndex == 0)
             {
-                _logger.LogWarning("[Ambilight] Extractor: no frames decoded for {Path}", videoPath);
+                // Try to get stderr output for better error reporting
+                string stderrOutput = "";
+                if (stderrTask != null)
+                {
+                    try
+                    {
+                        stderrOutput = await stderrTask.ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // Ignore errors reading stderr
+                    }
+                }
+                
+                if (!string.IsNullOrWhiteSpace(stderrOutput))
+                {
+                    _logger.LogWarning("[Ambilight] Extractor: no frames decoded for {Path}. ffmpeg stderr: {Error}", videoPath, stderrOutput);
+                }
+                else
+                {
+                    _logger.LogWarning("[Ambilight] Extractor: no frames decoded for {Path}", videoPath);
+                }
                 return false;
             }
 
@@ -296,6 +416,9 @@ public sealed class AmbilightInProcessExtractor
             var tempPath = outputPath + ".tmp";
             await File.WriteAllBytesAsync(tempPath, ms.ToArray(), cancellationToken).ConfigureAwait(false);
             File.Move(tempPath, outputPath, overwrite: true);
+            
+            // Report 100% completion
+            progress?.Report((frameIndex, estimatedFrames));
 
             long fileSize = 0;
             try
@@ -311,7 +434,10 @@ public sealed class AmbilightInProcessExtractor
                 // ignore size errors
             }
 
-            _logger.LogInformation("[Ambilight] Extractor: wrote AMb2 file {Output} with {Frames} frames", outputPath, frameIndex);
+            if (_config.Debug)
+            {
+                _logger.LogInformation("[Ambilight] Extractor: wrote AMb2 file {Output} with {Frames} frames", outputPath, frameIndex);
+            }
             if (_config.Debug)
             {
                 _logger.LogInformation("[Ambilight] Extractor: final file {Output} size {SizeBytes} bytes (~{SizeMb:F2} MB)",

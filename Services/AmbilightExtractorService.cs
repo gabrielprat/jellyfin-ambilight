@@ -191,13 +191,32 @@ public class AmbilightExtractorService
         {
             _logger.LogInformation("[Ambilight] Starting in-process extractor for {ItemName}", item.Name);
 
-            var ok = await _extractorCore.ExtractAsync(item.FilePath, binPath, cancellationToken).ConfigureAwait(false);
+            // Set status to extracting
+            item.ExtractionStatus = "extracting";
+            item.ExtractionProgress = 0;
+            item.ExtractionFramesCurrent = 0;
+            item.ExtractionFramesTotal = 0;
+            _storage.SaveOrUpdateItem(item);
+
+            // Create a progress callback that receives (currentFrame, totalFrames)
+            var progressCallback = new Progress<(ulong current, ulong total)>(progress =>
+            {
+                item.ExtractionFramesCurrent = progress.current;
+                item.ExtractionFramesTotal = progress.total;
+                item.ExtractionProgress = progress.total > 0 ? (int)Math.Min(99, (progress.current * 100) / progress.total) : 0;
+                _storage.UpdateExtractionProgress(item.Id, progress.current, progress.total);
+            });
+
+            var ok = await _extractorCore.ExtractAsync(item.FilePath, binPath, cancellationToken, progressCallback).ConfigureAwait(false);
 
             if (ok && File.Exists(binPath))
             {
                 item.ExtractionStatus = "completed";
                 item.ExtractionError = null;
-                _logger.LogInformation("[Ambilight] Extraction completed for {ItemName}", item.Name);
+                if (_config.Debug)
+                {
+                    _logger.LogInformation("[Ambilight] Extraction completed for {ItemName}", item.Name);
+                }
             }
             else
             {
@@ -205,6 +224,20 @@ public class AmbilightExtractorService
                 item.ExtractionError = "Extractor returned failure";
                 _logger.LogWarning("[Ambilight] Extraction failed for {ItemName}", item.Name);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            // Gracefully handle cancellation (e.g., during Jellyfin shutdown)
+            item.ExtractionStatus = "pending";
+            item.ExtractionError = null;
+            item.ExtractionProgress = 0;
+            item.ExtractionFramesCurrent = 0;
+            item.ExtractionFramesTotal = 0;
+            if (_config.Debug)
+            {
+                _logger.LogInformation("[Ambilight] Extraction cancelled for {ItemName}", item.Name);
+            }
+            _storage.ClearExtractionProgress(item.Id);
         }
         catch (Exception ex)
         {
