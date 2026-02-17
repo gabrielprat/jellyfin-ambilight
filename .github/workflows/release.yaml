@@ -90,6 +90,25 @@ jobs:
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
+        
+        # Fetch and checkout master branch
+        git fetch origin master
+        git checkout master
+        git pull origin master
+        
+        # Update manifest.json again on master branch
+        TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        jq --arg version "${{ steps.version.outputs.VERSION }}" \
+           --arg checksum "${{ steps.checksum.outputs.CHECKSUM }}" \
+           --arg timestamp "$TIMESTAMP" \
+           --arg sourceUrl "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/jellyfin-plugin-ambilight_${{ steps.version.outputs.VERSION }}.zip" \
+           '.[0].versions[0].version = $version |
+            .[0].versions[0].checksum = $checksum |
+            .[0].versions[0].timestamp = $timestamp |
+            .[0].versions[0].sourceUrl = $sourceUrl' \
+           manifest.json > manifest.json.tmp
+        mv manifest.json.tmp manifest.json
+        
         git add manifest.json
         
         # Check if there are changes to commit
