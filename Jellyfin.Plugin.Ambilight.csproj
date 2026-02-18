@@ -7,6 +7,12 @@
     <FileVersion>1.4.2</FileVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
+    <Copyright>Copyright (c) 2026 Jellyfin Ambilight Contributors</Copyright>
+    <Authors>Jellyfin Ambilight Contributors</Authors>
+    <PackageProjectUrl>https://github.com/gabrielprat/jellyfin-ambilight</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/gabrielprat/jellyfin-ambilight</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
     <!-- Required for Jellyfin plugin layout -->
     <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
     <!-- Keep output clean and avoid copying Jellyfin's own deps -->
