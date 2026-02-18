@@ -71,3 +71,5 @@ ehthumbs.db
 local.settings.json
 .env.local
 
+# Maintained by github workflow
+manifest.json
