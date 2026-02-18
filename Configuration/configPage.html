@@ -53,10 +53,11 @@
                     </div>
 
                     <div class="selectContainer">
-                        <label class="selectLabel" for="ExcludedLibraries">Excluded libraries</label>
-                        <select id="ExcludedLibraries" is="emby-select" class="emby-select-withcolor emby-select" multiple>
-                        </select>
-                        <div class="fieldDescription">Libraries to skip when extracting ambilight data.</div>
+                        <label class="selectLabel">Excluded libraries</label>
+                        <div id="ExcludedLibraries" style="margin-top: 0.5em; margin-bottom: 0.5em;">
+                            <!-- Libraries will be loaded here as checkboxes -->
+                        </div>
+                        <div class="fieldDescription">Check the libraries to skip when extracting ambilight data.</div>
                     </div>
 
                     <div class="selectContainer">
@@ -394,15 +395,15 @@
 
                     // Excluded libraries
                     var excluded = [];
-                    var libSelect = document.getElementById('ExcludedLibraries');
-                    if (libSelect) {
-                        for (var i = 0; i < libSelect.options.length; i++) {
-                            var opt = libSelect.options[i];
-                            if (opt.selected && opt.value) {
-                                excluded.push(opt.value);
+                    var checkboxes = document.querySelectorAll('.excluded-library-checkbox');
+                    checkboxes.forEach(function(checkbox) {
+                        if (checkbox.checked) {
+                            var libraryId = checkbox.getAttribute('data-library-id');
+                            if (libraryId) {
+                                excluded.push(libraryId);
                             }
                         }
-                    }
+                    });
                     config.ExcludedLibraryIds = excluded;
 
                     ApiClient.updatePluginConfiguration(AmbilightConfig.pluginUniqueId, config).then(function (result) {
@@ -522,8 +523,8 @@
                 });
             })();
 
-            // ===== MANAGER TAB LOGIC ===== v1.3.0 - Batch API
-            console.log('[Ambilight] Config v1.3.0 - Batch API Implementation');
+            // ===== MANAGER TAB LOGIC ===== v1.4.0 - Scheduled Task Integration
+            console.log('[Ambilight] Config v1.4.0 - Scheduled Task Integration');
             
             let allVideos = [];
             let currentFilter = '';
@@ -549,25 +550,45 @@
             }
 
             function loadLibraries(config) {
-                var select = document.getElementById('ExcludedLibraries');
-                if (!select) return;
+                var container = document.getElementById('ExcludedLibraries');
+                if (!container) return;
 
                 ApiClient.getUserViews(ApiClient.getCurrentUserId()).then(function (result) {
-                    select.innerHTML = '';
+                    container.innerHTML = '';
                     var items = (result && result.Items) || [];
                     var excluded = config.ExcludedLibraryIds || [];
 
+                    if (items.length === 0) {
+                        container.innerHTML = '<p style="opacity: 0.7; font-style: italic;">No libraries found</p>';
+                        return;
+                    }
+
                     items.forEach(function (view) {
-                        var opt = document.createElement('option');
-                        opt.value = view.Id;
-                        opt.textContent = view.Name;
-                        if (excluded.indexOf(view.Id) !== -1) {
-                            opt.selected = true;
-                        }
-                        select.appendChild(opt);
+                        var checkboxContainer = document.createElement('div');
+                        checkboxContainer.className = 'checkboxContainer';
+                        checkboxContainer.style.marginBottom = '0.5em';
+                        
+                        var label = document.createElement('label');
+                        label.className = 'emby-checkbox-label';
+                        
+                        var checkbox = document.createElement('input');
+                        checkbox.type = 'checkbox';
+                        checkbox.setAttribute('is', 'emby-checkbox');
+                        checkbox.className = 'excluded-library-checkbox';
+                        checkbox.setAttribute('data-library-id', view.Id);
+                        checkbox.checked = excluded.indexOf(view.Id) !== -1;
+                        
+                        var span = document.createElement('span');
+                        span.textContent = view.Name;
+                        
+                        label.appendChild(checkbox);
+                        label.appendChild(span);
+                        checkboxContainer.appendChild(label);
+                        container.appendChild(checkboxContainer);
                     });
                 }).catch(function (e) {
                     console.log('[Ambilight] Failed to load libraries', e);
+                    container.innerHTML = '<p style="opacity: 0.7; color: #ef4444;">Failed to load libraries</p>';
                 });
             }
 
@@ -856,7 +877,7 @@
 
                     console.log('[Ambilight] Total videos loaded:', allVideos.length);
 
-                    // ===== BATCH API REQUEST - v1.3.0 =====
+                    // ===== BATCH API REQUEST - v1.4.0 =====
                     console.log('[Ambilight] Fetching status for', allVideos.length, 'videos in batch');
                     
                     try {

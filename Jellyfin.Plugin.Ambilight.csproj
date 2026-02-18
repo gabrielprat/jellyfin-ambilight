@@ -3,8 +3,8 @@
     <TargetFramework>net8.0</TargetFramework>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
     <AssemblyName>Jellyfin.Plugin.Ambilight</AssemblyName>
-    <AssemblyVersion>1.3.0</AssemblyVersion>
-    <FileVersion>1.3.0</FileVersion>
+    <AssemblyVersion>1.4.0</AssemblyVersion>
+    <FileVersion>1.4.0</FileVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- Required for Jellyfin plugin layout -->

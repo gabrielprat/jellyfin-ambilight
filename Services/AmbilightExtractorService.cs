@@ -52,52 +52,61 @@ public class AmbilightExtractorService
         var excluded = _config.ExcludedLibraryIds ?? new List<string>();
         var normalizedExcluded = excluded.Select(NormalizeLibraryId).ToHashSet();
 
-        foreach (var item in _libraryManager.GetItemList(new InternalItemsQuery
-                 {
-                     IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode },
-                     Recursive = true
-                 }))
+        // Get all user views (libraries)
+        var userViews = _libraryManager.GetUserRootFolder().Children
+            .Where(v => v is MediaBrowser.Controller.Entities.CollectionFolder)
+            .ToList();
+
+        // Filter to only allowed libraries
+        var allowedLibraries = userViews
+            .Where(lib => !normalizedExcluded.Contains(NormalizeLibraryId(lib.Id.ToString())))
+            .ToList();
+
+        _logger.LogInformation("[Ambilight] Syncing {Count} libraries (excluding {ExcludedCount} libraries)", 
+            allowedLibraries.Count, excluded.Count);
+
+        // Query each allowed library separately
+        foreach (var library in allowedLibraries)
         {
-            if (item.Path is null)
+            var query = new InternalItemsQuery
             {
-                continue;
-            }
+                IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode },
+                Recursive = true,
+                Parent = library
+            };
 
-            // Get the library ID by walking up the parent chain
-            var libraryId = GetLibraryId(item);
-
-            // Skip items from excluded libraries (normalize for comparison)
-            if (normalizedExcluded.Count > 0 && !string.IsNullOrEmpty(libraryId))
+            var result = _libraryManager.GetItemsResult(query);
+            foreach (var item in result.Items)
             {
-                if (normalizedExcluded.Contains(NormalizeLibraryId(libraryId)))
+                if (item.Path is null)
                 {
                     continue;
                 }
-            }
 
-            var itemIdStr = item.Id.ToString("N");
-            var ambiItem = _storage.GetItem(itemIdStr);
-            if (ambiItem == null)
-            {
-                ambiItem = new AmbilightItem
+                var itemIdStr = item.Id.ToString("N");
+                var ambiItem = _storage.GetItem(itemIdStr);
+                if (ambiItem == null)
                 {
-                    Id = itemIdStr,
-                    LibraryId = libraryId ?? item.ParentId.ToString("N"),
-                    Name = item.Name ?? "Unknown",
-                    Type = item.GetType().Name,
-                    Kind = item.GetType().Name == "Episode" ? "Serie" : (item.GetType().Name == "Movie" ? "Movie" : "Video"),
-                    FilePath = item.Path,
-                    JellyfinDateCreated = item.DateCreated.ToString("O"),
-                    Viewed = false
-                };
-            }
-            else
-            {
-                ambiItem.FilePath = item.Path;
-                ambiItem.Name = item.Name ?? ambiItem.Name;
-            }
+                    ambiItem = new AmbilightItem
+                    {
+                        Id = itemIdStr,
+                        LibraryId = library.Id.ToString("N"),
+                        Name = item.Name ?? "Unknown",
+                        Type = item.GetType().Name,
+                        Kind = item.GetType().Name == "Episode" ? "Serie" : (item.GetType().Name == "Movie" ? "Movie" : "Video"),
+                        FilePath = item.Path,
+                        JellyfinDateCreated = item.DateCreated.ToString("O"),
+                        Viewed = false
+                    };
+                }
+                else
+                {
+                    ambiItem.FilePath = item.Path;
+                    ambiItem.Name = item.Name ?? ambiItem.Name;
+                }
 
-            _storage.SaveOrUpdateItem(ambiItem);
+                _storage.SaveOrUpdateItem(ambiItem);
+            }
         }
     }
 
@@ -111,66 +120,112 @@ public class AmbilightExtractorService
         var excluded = _config.ExcludedLibraryIds ?? new List<string>();
         var normalizedExcluded = excluded.Select(NormalizeLibraryId).ToHashSet();
 
-        var videoItems = _libraryManager.GetItemList(new InternalItemsQuery
+        // Get all user views (libraries)
+        var userViews = _libraryManager.GetUserRootFolder().Children
+            .Where(v => v is MediaBrowser.Controller.Entities.CollectionFolder)
+            .ToList();
+
+        // Filter to only allowed libraries
+        var allowedLibraries = userViews
+            .Where(lib => !normalizedExcluded.Contains(NormalizeLibraryId(lib.Id.ToString())))
+            .ToList();
+
+        _logger.LogDebug("[Ambilight] Checking {Count} libraries for pending extractions (excluding {ExcludedCount} libraries)", 
+            allowedLibraries.Count, excluded.Count);
+
+        // Collect all pending items first (before sorting)
+        var pendingItems = new List<AmbilightItem>();
+
+        // Query each allowed library separately
+        foreach (var library in allowedLibraries)
         {
-            IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode },
-            Recursive = true
-        });
-
-        foreach (var jellyfinItem in videoItems)
-        {
-            if (jellyfinItem.Path == null)
+            var query = new InternalItemsQuery
             {
-                continue;
-            }
+                IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode },
+                Recursive = true,
+                Parent = library
+            };
 
-            // Get the library ID by walking up the parent chain
-            var libraryId = GetLibraryId(jellyfinItem);
-
-            // Skip items from excluded libraries (normalize for comparison)
-            if (normalizedExcluded.Count > 0 && !string.IsNullOrEmpty(libraryId))
+            var result = _libraryManager.GetItemsResult(query);
+            foreach (var jellyfinItem in result.Items)
             {
-                if (normalizedExcluded.Contains(NormalizeLibraryId(libraryId)))
+                if (jellyfinItem.Path == null)
                 {
                     continue;
                 }
-            }
 
-            var itemIdStr = jellyfinItem.Id.ToString("N");
-            var item = _storage.GetItem(itemIdStr);
-            if (item == null)
-            {
-                item = new AmbilightItem
+                var itemIdStr = jellyfinItem.Id.ToString("N");
+                var item = _storage.GetItem(itemIdStr);
+                if (item == null)
                 {
-                    Id = itemIdStr,
-                    LibraryId = jellyfinItem.ParentId.ToString("N"),
-                    Name = jellyfinItem.Name ?? "Unknown",
-                    Type = jellyfinItem.GetType().Name,
-                    Kind = jellyfinItem.GetType().Name == "Episode" ? "Serie" : (jellyfinItem.GetType().Name == "Movie" ? "Movie" : "Video"),
-                    FilePath = jellyfinItem.Path,
-                    JellyfinDateCreated = jellyfinItem.DateCreated.ToString("O"),
-                    Viewed = false
-                };
-                _storage.SaveOrUpdateItem(item);
-            }
+                    item = new AmbilightItem
+                    {
+                        Id = itemIdStr,
+                        LibraryId = library.Id.ToString("N"),
+                        Name = jellyfinItem.Name ?? "Unknown",
+                        Type = jellyfinItem.GetType().Name,
+                        Kind = jellyfinItem.GetType().Name == "Episode" ? "Serie" : (jellyfinItem.GetType().Name == "Movie" ? "Movie" : "Video"),
+                        FilePath = jellyfinItem.Path,
+                        JellyfinDateCreated = jellyfinItem.DateCreated.ToString("O"),
+                        Viewed = false
+                    };
+                    _storage.SaveOrUpdateItem(item);
+                }
 
-            if (string.IsNullOrEmpty(item.FilePath) || !File.Exists(item.FilePath))
-            {
-                continue;
-            }
+                if (string.IsNullOrEmpty(item.FilePath) || !File.Exists(item.FilePath))
+                {
+                    continue;
+                }
 
-            if (item.ExtractionStatus == "failed")
-            {
-                continue;
-            }
+                if (item.ExtractionStatus == "failed")
+                {
+                    continue;
+                }
 
-            if (_storage.BinaryExists(item.Id))
-            {
-                continue;
-            }
+                if (_storage.BinaryExists(item.Id))
+                {
+                    continue;
+                }
 
-            yield return item;
+                pendingItems.Add(item);
+            }
         }
+
+        // Sort according to extraction priority
+        var priority = _config.ExtractionPriority ?? "newest_first";
+        _logger.LogDebug("[Ambilight] Sorting {Count} pending items by priority: {Priority}", 
+            pendingItems.Count, priority);
+
+        switch (priority.ToLowerInvariant())
+        {
+            case "oldest_first":
+                pendingItems = pendingItems
+                    .OrderBy(i => DateTime.TryParse(i.JellyfinDateCreated, out var date) ? date : DateTime.MinValue)
+                    .ToList();
+                break;
+
+            case "alphabetical":
+                pendingItems = pendingItems
+                    .OrderBy(i => i.Name)
+                    .ToList();
+                break;
+
+            case "movies_newest_first":
+                pendingItems = pendingItems
+                    .OrderByDescending(i => i.Kind == "Movie" ? 1 : 0)
+                    .ThenByDescending(i => DateTime.TryParse(i.JellyfinDateCreated, out var date) ? date : DateTime.MinValue)
+                    .ToList();
+                break;
+
+            case "newest_first":
+            default:
+                pendingItems = pendingItems
+                    .OrderByDescending(i => DateTime.TryParse(i.JellyfinDateCreated, out var date) ? date : DateTime.MinValue)
+                    .ToList();
+                break;
+        }
+
+        return pendingItems;
     }
 
     /// <summary>
