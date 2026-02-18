@@ -58,37 +58,33 @@ jobs:
           cat "$RELEASE_NOTES_FILE" > release_body.md
           
           # Append installation instructions
-          cat >> release_body.md << 'EOF'
-
----
-
-## Installation
-
-1. Download the `.zip` file below
-2. Extract it to your Jellyfin plugins folder: `/config/plugins/Ambilight/`
-3. Restart Jellyfin
-
-**MD5 Checksum:** `${{ steps.checksum.outputs.CHECKSUM }}`
-
-See [README.md](https://github.com/${{ github.repository }}/blob/master/README.md) for detailed installation and configuration instructions.
-EOF
+          echo "" >> release_body.md
+          echo "---" >> release_body.md
+          echo "" >> release_body.md
+          echo "## Installation" >> release_body.md
+          echo "" >> release_body.md
+          echo "1. Download the \`.zip\` file below" >> release_body.md
+          echo "2. Extract it to your Jellyfin plugins folder: \`/config/plugins/Ambilight/\`" >> release_body.md
+          echo "3. Restart Jellyfin" >> release_body.md
+          echo "" >> release_body.md
+          echo "**MD5 Checksum:** \`${{ steps.checksum.outputs.CHECKSUM }}\`" >> release_body.md
+          echo "" >> release_body.md
+          echo "See [README.md](https://github.com/${{ github.repository }}/blob/master/README.md) for detailed installation and configuration instructions." >> release_body.md
         else
           echo "Release notes file not found: $RELEASE_NOTES_FILE"
           echo "Using default release body"
           
-          cat > release_body.md << 'EOF'
-## Jellyfin Ambilight Plugin v${{ steps.version.outputs.VERSION }}
-
-## Installation
-
-1. Download the `.zip` file below
-2. Extract it to your Jellyfin plugins folder: `/config/plugins/Ambilight/`
-3. Restart Jellyfin
-
-**MD5 Checksum:** `${{ steps.checksum.outputs.CHECKSUM }}`
-
-See [README.md](https://github.com/${{ github.repository }}/blob/master/README.md) for detailed installation and configuration instructions.
-EOF
+          echo "## Jellyfin Ambilight Plugin v${{ steps.version.outputs.VERSION }}" > release_body.md
+          echo "" >> release_body.md
+          echo "## Installation" >> release_body.md
+          echo "" >> release_body.md
+          echo "1. Download the \`.zip\` file below" >> release_body.md
+          echo "2. Extract it to your Jellyfin plugins folder: \`/config/plugins/Ambilight/\`" >> release_body.md
+          echo "3. Restart Jellyfin" >> release_body.md
+          echo "" >> release_body.md
+          echo "**MD5 Checksum:** \`${{ steps.checksum.outputs.CHECKSUM }}\`" >> release_body.md
+          echo "" >> release_body.md
+          echo "See [README.md](https://github.com/${{ github.repository }}/blob/master/README.md) for detailed installation and configuration instructions." >> release_body.md
         fi
     
     - name: Create Release
