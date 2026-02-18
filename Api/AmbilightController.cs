@@ -1,11 +1,15 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Ambilight.Server;
+using Jellyfin.Plugin.Ambilight.Services;
+using Jellyfin.Plugin.Ambilight.Tasks;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Model.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -260,6 +264,61 @@ public class AmbilightController : ControllerBase
     }
 
     /// <summary>
+    /// Triggers the scheduled task to extract all pending items.
+    /// </summary>
+    /// <returns>Result with task status.</returns>
+    [HttpPost("ExtractAllPending")]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public ActionResult<AmbilightExtractAllResponse> ExtractAllPending()
+    {
+        try
+        {
+            var taskManager = HttpContext.RequestServices.GetService<ITaskManager>();
+            if (taskManager == null)
+            {
+                return StatusCode(500, new { error = "Task manager not available" });
+            }
+
+            // Find the extraction task
+            var extractionTask = taskManager.ScheduledTasks
+                .FirstOrDefault(t => t.ScheduledTask is ExtractPendingAmbilightTask);
+            
+            if (extractionTask == null)
+            {
+                return StatusCode(500, new { error = "Extraction task not found. Restart Jellyfin to register the task." });
+            }
+            
+            // Check if task is already running
+            if (extractionTask.State == TaskState.Running)
+            {
+                return Ok(new AmbilightExtractAllResponse
+                {
+                    QueuedCount = 0,
+                    Message = "Extraction task is already running. Check Jellyfin Dashboard > Scheduled Tasks for progress."
+                });
+            }
+
+            // Trigger the task using the task manager
+            taskManager.Execute(extractionTask, new MediaBrowser.Model.Tasks.TaskOptions());
+
+            return Accepted(new AmbilightExtractAllResponse
+            {
+                QueuedCount = -1, // Unknown at this point, task will count during execution
+                Message = "Extraction task started. Check Jellyfin Dashboard > Scheduled Tasks for progress."
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { 
+                error = ex.Message,
+                type = ex.GetType().Name,
+                stackTrace = ex.StackTrace 
+            });
+        }
+    }
+
+    /// <summary>
     /// Triggers ambilight extraction for a specific item.
     /// </summary>
     /// <param name="itemId">The item ID.</param>
@@ -378,5 +437,11 @@ public class AmbilightExtractResponse
 {
     public Guid ItemId { get; set; }
     public string? ItemName { get; set; }
+    public string? Message { get; set; }
+}
+
+public class AmbilightExtractAllResponse
+{
+    public int QueuedCount { get; set; }
     public string? Message { get; set; }
 }
