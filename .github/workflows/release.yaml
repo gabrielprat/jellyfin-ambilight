@@ -100,43 +100,17 @@ jobs:
     - name: Install jq
       run: sudo apt-get update && sudo apt-get install -y jq
     
-    - name: Update manifest.json
-      run: |
-        TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-        
-        # Extract changelog from RELEASE_NOTES file in release-notes folder
-        RELEASE_NOTES_FILE="release-notes/RELEASE_NOTES_v${{ steps.version.outputs.VERSION }}.md"
-        if [ -f "$RELEASE_NOTES_FILE" ]; then
-          echo "Found release notes: $RELEASE_NOTES_FILE"
-          # Read file, escape for JSON, preserve newlines as \n
-          CHANGELOG=$(cat "$RELEASE_NOTES_FILE" | jq -Rs .)
-        else
-          echo "Release notes not found: $RELEASE_NOTES_FILE, using fallback"
-          CHANGELOG="\"See release notes at: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}\""
-        fi
-        
-        # Use jq to update the manifest
-        jq --arg version "${{ steps.version.outputs.VERSION }}" \
-           --arg checksum "${{ steps.checksum.outputs.CHECKSUM }}" \
-           --arg timestamp "$TIMESTAMP" \
-           --arg sourceUrl "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/jellyfin-plugin-ambilight_${{ steps.version.outputs.VERSION }}.zip" \
-           --argjson changelog "$CHANGELOG" \
-           '.[0].versions[0].version = $version |
-            .[0].versions[0].checksum = $checksum |
-            .[0].versions[0].timestamp = $timestamp |
-            .[0].versions[0].sourceUrl = $sourceUrl |
-            .[0].versions[0].changelog = $changelog' \
-           manifest.json > manifest.json.tmp
-        
-        mv manifest.json.tmp manifest.json
-        
-        echo "Manifest updated successfully"
-        cat manifest.json
-    
     - name: Commit and push manifest update
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
+        
+        # Backup and remove manifest.json before checkout to avoid conflicts
+        # (manifest.json is untracked locally but tracked on master)
+        if [ -f manifest.json ]; then
+          cp manifest.json /tmp/manifest.json.backup
+          rm manifest.json
+        fi
         
         # Fetch and checkout master branch
         git fetch origin master
