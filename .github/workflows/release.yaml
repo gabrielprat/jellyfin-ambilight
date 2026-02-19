@@ -105,13 +105,6 @@ jobs:
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
         
-        # Backup and remove manifest.json before checkout to avoid conflicts
-        # (manifest.json is untracked locally but tracked on master)
-        if [ -f manifest.json ]; then
-          cp manifest.json /tmp/manifest.json.backup
-          rm manifest.json
-        fi
-        
         # Fetch and checkout master branch
         git fetch origin master
         git checkout master
