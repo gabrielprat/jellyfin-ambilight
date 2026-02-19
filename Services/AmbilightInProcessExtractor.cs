@@ -185,10 +185,10 @@ public sealed class AmbilightInProcessExtractor
         // before applying software filters like scale
         string filterChain = hwaccel.ToLower() switch
         {
-            "qsv" => $"hwdownload,format=nv12,scale={ExtractWidth}:{ExtractHeight}",
-            "cuda" => $"hwdownload,format=nv12,scale={ExtractWidth}:{ExtractHeight}",
-            "videotoolbox" => $"hwdownload,format=nv12,scale={ExtractWidth}:{ExtractHeight}",
-            "vaapi" => $"hwdownload,format=nv12,scale={ExtractWidth}:{ExtractHeight}",
+            "qsv" => $"hwdownload,format=yuv420p,scale={ExtractWidth}:{ExtractHeight}",
+            "cuda" => $"hwdownload,format=yuv420p,scale={ExtractWidth}:{ExtractHeight}",
+            "videotoolbox" => $"hwdownload,format=yuv420p,scale={ExtractWidth}:{ExtractHeight}",
+            "vaapi" => $"hwdownload,format=yuv420p,scale={ExtractWidth}:{ExtractHeight}",
             _ => $"scale={ExtractWidth}:{ExtractHeight}" // auto or none - use simple software path
         };
         
