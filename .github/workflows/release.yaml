@@ -46,21 +46,52 @@ jobs:
         echo "CHECKSUM=$CHECKSUM" >> $GITHUB_OUTPUT
         echo "Checksum: $CHECKSUM"
     
+    - name: Prepare release notes
+      id: release_notes
+      run: |
+        RELEASE_NOTES_FILE="release-notes/RELEASE_NOTES_v${{ steps.version.outputs.VERSION }}.md"
+        
+        if [ -f "$RELEASE_NOTES_FILE" ]; then
+          echo "Release notes file found: $RELEASE_NOTES_FILE"
+          
+          # Create release body with markdown content from file
+          cat "$RELEASE_NOTES_FILE" > release_body.md
+          
+          # Append installation instructions
+          echo "" >> release_body.md
+          echo "---" >> release_body.md
+          echo "" >> release_body.md
+          echo "## Installation" >> release_body.md
+          echo "" >> release_body.md
+          echo "1. Download the \`.zip\` file below" >> release_body.md
+          echo "2. Extract it to your Jellyfin plugins folder: \`/config/plugins/Ambilight/\`" >> release_body.md
+          echo "3. Restart Jellyfin" >> release_body.md
+          echo "" >> release_body.md
+          echo "**MD5 Checksum:** \`${{ steps.checksum.outputs.CHECKSUM }}\`" >> release_body.md
+          echo "" >> release_body.md
+          echo "See [README.md](https://github.com/${{ github.repository }}/blob/master/README.md) for detailed installation and configuration instructions." >> release_body.md
+        else
+          echo "Release notes file not found: $RELEASE_NOTES_FILE"
+          echo "Using default release body"
+          
+          echo "## Jellyfin Ambilight Plugin v${{ steps.version.outputs.VERSION }}" > release_body.md
+          echo "" >> release_body.md
+          echo "## Installation" >> release_body.md
+          echo "" >> release_body.md
+          echo "1. Download the \`.zip\` file below" >> release_body.md
+          echo "2. Extract it to your Jellyfin plugins folder: \`/config/plugins/Ambilight/\`" >> release_body.md
+          echo "3. Restart Jellyfin" >> release_body.md
+          echo "" >> release_body.md
+          echo "**MD5 Checksum:** \`${{ steps.checksum.outputs.CHECKSUM }}\`" >> release_body.md
+          echo "" >> release_body.md
+          echo "See [README.md](https://github.com/${{ github.repository }}/blob/master/README.md) for detailed installation and configuration instructions." >> release_body.md
+        fi
+    
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
         files: release/jellyfin-plugin-ambilight_${{ steps.version.outputs.VERSION }}.zip
-        body: |
-          ## Jellyfin Ambilight Plugin v${{ steps.version.outputs.VERSION }}
-          
-          **Installation:**
-          1. Download the `.zip` file below
-          2. Extract it to your Jellyfin plugins folder
-          3. Restart Jellyfin
-          
-          **MD5 Checksum:** `${{ steps.checksum.outputs.CHECKSUM }}`
-          
-          See [INSTALLATION.md](https://github.com/gabrielprat/jellyfin-ambilight/blob/master/INSTALLATION.md) for detailed instructions.
+        body_path: release_body.md
         draft: false
         prerelease: false
       env:
@@ -73,18 +104,34 @@ jobs:
       run: |
         TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
         
+        # Extract changelog from RELEASE_NOTES file in release-notes folder
+        RELEASE_NOTES_FILE="release-notes/RELEASE_NOTES_v${{ steps.version.outputs.VERSION }}.md"
+        if [ -f "$RELEASE_NOTES_FILE" ]; then
+          echo "Found release notes: $RELEASE_NOTES_FILE"
+          # Read file, escape for JSON, preserve newlines as \n
+          CHANGELOG=$(cat "$RELEASE_NOTES_FILE" | jq -Rs .)
+        else
+          echo "Release notes not found: $RELEASE_NOTES_FILE, using fallback"
+          CHANGELOG="\"See release notes at: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}\""
+        fi
+        
         # Use jq to update the manifest
         jq --arg version "${{ steps.version.outputs.VERSION }}" \
            --arg checksum "${{ steps.checksum.outputs.CHECKSUM }}" \
            --arg timestamp "$TIMESTAMP" \
            --arg sourceUrl "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/jellyfin-plugin-ambilight_${{ steps.version.outputs.VERSION }}.zip" \
+           --argjson changelog "$CHANGELOG" \
            '.[0].versions[0].version = $version |
             .[0].versions[0].checksum = $checksum |
             .[0].versions[0].timestamp = $timestamp |
-            .[0].versions[0].sourceUrl = $sourceUrl' \
+            .[0].versions[0].sourceUrl = $sourceUrl |
+            .[0].versions[0].changelog = $changelog' \
            manifest.json > manifest.json.tmp
         
         mv manifest.json.tmp manifest.json
+        
+        echo "Manifest updated successfully"
+        cat manifest.json
     
     - name: Commit and push manifest update
       run: |
@@ -98,16 +145,31 @@ jobs:
         
         # Update manifest.json again on master branch
         TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        
+        # Extract changelog from RELEASE_NOTES file in release-notes folder
+        RELEASE_NOTES_FILE="release-notes/RELEASE_NOTES_v${{ steps.version.outputs.VERSION }}.md"
+        if [ -f "$RELEASE_NOTES_FILE" ]; then
+          echo "Found release notes: $RELEASE_NOTES_FILE"
+          CHANGELOG=$(cat "$RELEASE_NOTES_FILE" | jq -Rs .)
+        else
+          echo "Release notes not found: $RELEASE_NOTES_FILE, using fallback"
+          CHANGELOG="\"See release notes at: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}\""
+        fi
+        
         jq --arg version "${{ steps.version.outputs.VERSION }}" \
            --arg checksum "${{ steps.checksum.outputs.CHECKSUM }}" \
            --arg timestamp "$TIMESTAMP" \
            --arg sourceUrl "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/jellyfin-plugin-ambilight_${{ steps.version.outputs.VERSION }}.zip" \
+           --argjson changelog "$CHANGELOG" \
            '.[0].versions[0].version = $version |
             .[0].versions[0].checksum = $checksum |
             .[0].versions[0].timestamp = $timestamp |
-            .[0].versions[0].sourceUrl = $sourceUrl' \
+            .[0].versions[0].sourceUrl = $sourceUrl |
+            .[0].versions[0].changelog = $changelog' \
            manifest.json > manifest.json.tmp
         mv manifest.json.tmp manifest.json
+        
+        echo "Manifest updated on master branch"
         
         git add manifest.json
         

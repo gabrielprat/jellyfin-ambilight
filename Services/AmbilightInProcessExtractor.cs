@@ -1,3 +1,11 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Jellyfin Ambilight Contributors
+// This file is part of Jellyfin Ambilight Plugin.
+// Jellyfin Ambilight Plugin is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -162,8 +170,6 @@ public sealed class AmbilightInProcessExtractor
         var baseArgs = "-hide_banner -loglevel error";
         
         // Hardware acceleration options
-        // Note: For most modes we keep it simple - just enable hwaccel for decoding
-        // and let ffmpeg handle the format conversion automatically
         string hwaccelArgs = hwaccel.ToLower() switch
         {
             "vaapi" => "-hwaccel vaapi -hwaccel_device /dev/dri/renderD128",
@@ -174,9 +180,17 @@ public sealed class AmbilightInProcessExtractor
             _ => "" // "auto" - let ffmpeg auto-detect, but don't force it
         };
         
-        // Use simple software filter chain - hardware acceleration is only for decoding
-        // ffmpeg will automatically transfer frames to system memory for filtering
-        string filterChain = $"scale={ExtractWidth}:{ExtractHeight}";
+        // Build filter chain based on acceleration type
+        // For hardware acceleration, we need to explicitly download frames from GPU to CPU
+        // before applying software filters like scale
+        string filterChain = hwaccel.ToLower() switch
+        {
+            "qsv" => $"hwdownload,format=nv12,scale={ExtractWidth}:{ExtractHeight}",
+            "cuda" => $"hwdownload,format=nv12,scale={ExtractWidth}:{ExtractHeight}",
+            "videotoolbox" => $"hwdownload,format=nv12,scale={ExtractWidth}:{ExtractHeight}",
+            "vaapi" => $"hwdownload,format=nv12,scale={ExtractWidth}:{ExtractHeight}",
+            _ => $"scale={ExtractWidth}:{ExtractHeight}" // auto or none - use simple software path
+        };
         
         return $"{baseArgs} {hwaccelArgs} -i \"{videoPath}\" -vf {filterChain} -pix_fmt rgb24 -f rawvideo pipe:1".Trim();
     }

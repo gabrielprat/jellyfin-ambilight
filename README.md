@@ -1,6 +1,6 @@
 # Jellyfin Ambilight Plugin
 
-**Version:** 1.4.0
+**Version:** 1.5.0
 
 Transform your Jellyfin viewing experience with synchronized ambient lighting! This plugin automatically creates immersive ambilight effects for your movies and TV shows by controlling WLED-compatible LED strips.
 
@@ -251,6 +251,21 @@ For issues, questions, or feature requests:
 - **Review this README** and the configuration screenshot
 - **Check existing issues** on the GitHub repository
 
+## License
+
+This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
+
+### What does this mean?
+
+The GPLv3 license grants you the freedom to:
+- Use this software for any purpose
+- Study and modify the source code
+- Share copies of the software
+- Share your modifications
+
+Under the condition that any distributed modifications or derivative works are also licensed under the GPLv3.
+
+For more information about the GPL license, visit: https://www.gnu.org/licenses/gpl-3.0.html
 
 ---
 
