@@ -170,6 +170,8 @@ public sealed class AmbilightInProcessExtractor
         var baseArgs = "-hide_banner -loglevel error";
         
         // Hardware acceleration options
+        // Note: For most modes we keep it simple - just enable hwaccel for decoding
+        // and let ffmpeg handle the format conversion automatically
         string hwaccelArgs = hwaccel.ToLower() switch
         {
             "vaapi" => "-hwaccel vaapi -hwaccel_device /dev/dri/renderD128",
@@ -180,18 +182,9 @@ public sealed class AmbilightInProcessExtractor
             _ => "" // "auto" - let ffmpeg auto-detect, but don't force it
         };
         
-        // Build filter chain based on acceleration type
-        // For hardware acceleration, we need to explicitly download frames from GPU to CPU
-        // before applying software filters like scale
-        // Note: We don't specify a format after hwdownload - let FFmpeg auto-negotiate
-        string filterChain = hwaccel.ToLower() switch
-        {
-            "qsv" => $"hwdownload,scale={ExtractWidth}:{ExtractHeight}",
-            "cuda" => $"hwdownload,scale={ExtractWidth}:{ExtractHeight}",
-            "videotoolbox" => $"hwdownload,scale={ExtractWidth}:{ExtractHeight}",
-            "vaapi" => $"hwdownload,scale={ExtractWidth}:{ExtractHeight}",
-            _ => $"scale={ExtractWidth}:{ExtractHeight}" // auto or none - use simple software path
-        };
+        // Use simple software filter chain - hardware acceleration is only for decoding
+        // ffmpeg will automatically transfer frames to system memory for filtering
+        string filterChain = $"scale={ExtractWidth}:{ExtractHeight}";
         
         return $"{baseArgs} {hwaccelArgs} -i \"{videoPath}\" -vf {filterChain} -pix_fmt rgb24 -f rawvideo pipe:1".Trim();
     }
