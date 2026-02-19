@@ -183,12 +183,13 @@ public sealed class AmbilightInProcessExtractor
         // Build filter chain based on acceleration type
         // For hardware acceleration, we need to explicitly download frames from GPU to CPU
         // before applying software filters like scale
+        // Note: We don't specify a format after hwdownload - let FFmpeg auto-negotiate
         string filterChain = hwaccel.ToLower() switch
         {
-            "qsv" => $"hwdownload,format=yuv420p,scale={ExtractWidth}:{ExtractHeight}",
-            "cuda" => $"hwdownload,format=yuv420p,scale={ExtractWidth}:{ExtractHeight}",
-            "videotoolbox" => $"hwdownload,format=yuv420p,scale={ExtractWidth}:{ExtractHeight}",
-            "vaapi" => $"hwdownload,format=yuv420p,scale={ExtractWidth}:{ExtractHeight}",
+            "qsv" => $"hwdownload,scale={ExtractWidth}:{ExtractHeight}",
+            "cuda" => $"hwdownload,scale={ExtractWidth}:{ExtractHeight}",
+            "videotoolbox" => $"hwdownload,scale={ExtractWidth}:{ExtractHeight}",
+            "vaapi" => $"hwdownload,scale={ExtractWidth}:{ExtractHeight}",
             _ => $"scale={ExtractWidth}:{ExtractHeight}" // auto or none - use simple software path
         };
         
