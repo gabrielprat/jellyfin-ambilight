@@ -12,6 +12,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.Ambilight;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Session;
 using MediaBrowser.Model.Session;
@@ -50,14 +51,21 @@ public class AmbilightPlaybackService
         _sessionManager = sessionManager;
         _libraryManager = libraryManager;
         _storage = storage;
-        _config = config;
+            _config = config;
     }
+
+    /// <summary>
+    /// Always prefer the latest plugin configuration so changes (like device mappings)
+    /// take effect without requiring a Jellyfin restart. Falls back to the constructor
+    /// snapshot if Plugin.Instance is not yet available.
+    /// </summary>
+    private PluginConfiguration Config => Plugin.Instance?.Configuration ?? _config;
 
     public void OnPlaybackStart(SessionInfo session, PlaybackProgressInfo info)
     {
         try
         {
-            var debug = _config.Debug;
+            var debug = Config.Debug;
 
             if (debug)
             {
@@ -72,9 +80,9 @@ public class AmbilightPlaybackService
                     rawDeviceId,
                     normalizedDeviceId);
 
-                if (_config.DeviceMappings?.Count > 0)
+                if (Config.DeviceMappings?.Count > 0)
                 {
-                    var mappingSummaries = _config.DeviceMappings
+                    var mappingSummaries = Config.DeviceMappings
                         .Select(m =>
                         {
                             var mappingId = m.DeviceIdentifier ?? string.Empty;
@@ -196,7 +204,7 @@ public class AmbilightPlaybackService
 
     public void OnPlaybackStopped(SessionInfo session, PlaybackStopInfo info)
     {
-        if (_config.Debug)
+        if (Config.Debug)
         {
             _logger.LogInformation("[Ambilight] Stop detected for session {SessionId}", session.Id);
         }
@@ -229,7 +237,7 @@ public class AmbilightPlaybackService
             // Detect significant jumps (seek) – keep threshold small so manual skips resync quickly
             if (Math.Abs(currSeconds - last) > 0.5)
             {
-                if (_config.Debug)
+                if (Config.Debug)
                 {
                     _logger.LogInformation("[Ambilight] Seek detected for session {SessionId} to {Seconds:F1}s", session.Id, currSeconds);
                 }
@@ -241,7 +249,7 @@ public class AmbilightPlaybackService
     // Device access is now controlled entirely by device mappings
     // Any device with at least one WLED mapping will have ambilight enabled
 
-    private List<DeviceMapping> ResolveWledTargets(SessionInfo session)
+        private List<DeviceMapping> ResolveWledTargets(SessionInfo session)
     {
         var targets = new List<DeviceMapping>();
         var seenTargets = new HashSet<(string host, int port)>();
@@ -253,8 +261,9 @@ public class AmbilightPlaybackService
         // Normalize deviceId by stripping timestamp (Jellyfin web clients use base64(UserAgent|timestamp))
         var normalizedDeviceId = StripDeviceIdTimestamp(deviceId);
 
-        // Find all matching device mappings
-        foreach (var mapping in _config.DeviceMappings)
+        // Find all matching device mappings from the latest configuration
+        var config = Config;
+        foreach (var mapping in config.DeviceMappings)
         {
             if (string.IsNullOrWhiteSpace(mapping.DeviceIdentifier) || string.IsNullOrWhiteSpace(mapping.Host))
             {
@@ -345,11 +354,11 @@ public class AmbilightPlaybackService
             
             foreach (var mapping in targets)
             {
-                var player = new AmbilightInProcessPlayer(_logger, _config);
+                var player = new AmbilightInProcessPlayer(_logger, Config);
                 player.Start(sessionId, binPath, mapping, startSeconds, loadingEffectCts);
                 players.Add(player);
                 
-                if (_config.Debug)
+                if (Config.Debug)
                 {
                     int totalLeds = mapping.TopLedCount + mapping.BottomLedCount + mapping.LeftLedCount + mapping.RightLedCount;
                     _logger.LogInformation("[Ambilight] Started player for session {SessionId} → {Host}:{Port} ({Leds} LEDs: T{Top} B{Bottom} L{Left} R{Right})", 
@@ -384,7 +393,7 @@ public class AmbilightPlaybackService
         }
     }
 
-    private void StopPlayersForSession(string sessionId)
+        private void StopPlayersForSession(string sessionId)
     {
         if (!_sessionPlayers.TryRemove(sessionId, out var players) || players.Count == 0)
         {
@@ -397,7 +406,7 @@ public class AmbilightPlaybackService
             player.Dispose();
         }
         
-        if (_config.Debug)
+        if (Config.Debug)
         {
             _logger.LogInformation("[Ambilight] Stopped {Count} in-process player(s) for session {SessionId}", players.Count, sessionId);
         }
