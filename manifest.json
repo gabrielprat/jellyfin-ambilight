@@ -17,12 +17,12 @@
         "timestamp": "2026-02-27T10:25:55Z"
       },
       {
-        "version": "1.5.6",
-        "changelog": "# Release Notes - v1.5.6\n\n## 🛠 Pause Sync, Extraction Retries & Debug Logging\n\nThis release fixes ambilight pause/resume behavior, improves the scheduled extraction task to retry failed items, and adds richer debug logging for device mappings.\n\nFor full details see `release-notes/RELEASE_NOTES_v1.5.6.md` in the repository.",
+        "version": "1.5.7",
+        "changelog": "# Release Notes - v1.5.7\n\n## 🎯 Device Mapping Matching Fix\n\n- Device mappings created from the settings UI now store the human-readable device name instead of Jellyfin's internal device ID.\n- Playback matching uses the current session's DeviceName, so mappings remain stable even if Jellyfin changes internal device IDs.\n- Existing mappings that were created with internal IDs will still load in the UI, but you may want to re-select the device in the dropdown and save to migrate them to the new, name-based identifiers.\n\n## 📦 Installation & Upgrade\n\n- For installation and upgrade instructions, see the `INSTALLATION.md` file in the repository.\n- After upgrading:\n  1. Restart Jellyfin.\n  2. Open the Ambilight plugin settings, review your Device Mappings, and re-save them if needed so they use device names.\n\n",
         "targetAbi": "10.10.0.0",
-        "sourceUrl": "https://github.com/gabrielprat/jellyfin-ambilight/releases/download/v1.5.6/jellyfin-plugin-ambilight_1.5.6.zip",
+        "sourceUrl": "https://github.com/gabrielprat/jellyfin-ambilight/releases/download/v1.5.7/jellyfin-plugin-ambilight_1.5.7.zip",
         "checksum": "REPLACE_WITH_ACTUAL_CHECKSUM",
-        "timestamp": "2026-02-27T00:00:00Z"
+        "timestamp": "2026-02-27T11:00:00Z"
       }
     ]
   }

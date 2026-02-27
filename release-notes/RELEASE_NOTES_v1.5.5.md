@@ -84,11 +84,11 @@ This release includes:
 
 **Highly Recommended Upgrade** if you want to use hardware acceleration:
 
-1. Download v1.5.5 from the releases page
-2. Replace `Jellyfin.Plugin.Ambilight.dll` in your plugins folder: `/config/plugins/Ambilight/`
-3. Restart Jellyfin
-4. Enable hardware acceleration in plugin settings (VAAPI, QSV, CUDA, or VideoToolbox)
-5. Run extractions - they should now work with hardware acceleration
+Follow the standard plugin installation/update steps in `INSTALLATION.md`.  
+After updating:
+1. Restart Jellyfin
+2. Enable hardware acceleration in plugin settings (VAAPI, QSV, CUDA, or VideoToolbox)
+3. Run extractions - they should now work with hardware acceleration
 
 ### Expected Behavior
 
