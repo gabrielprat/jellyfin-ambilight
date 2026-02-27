@@ -320,7 +320,8 @@ public class AmbilightEntryPoint : IHostedService
         var info = new PlaybackProgressInfo
         {
             ItemId = e.Item.Id,
-            PositionTicks = e.PlaybackPositionTicks
+            PositionTicks = e.PlaybackPositionTicks,
+            IsPaused = e.IsPaused
         };
         
         _playback.OnPlaybackStart(e.Session, info);
@@ -352,7 +353,8 @@ public class AmbilightEntryPoint : IHostedService
         var info = new PlaybackProgressInfo
         {
             ItemId = e.Item.Id,
-            PositionTicks = e.PlaybackPositionTicks
+            PositionTicks = e.PlaybackPositionTicks,
+            IsPaused = e.IsPaused
         };
         
         _playback.OnPlaybackProgress(e.Session, info);

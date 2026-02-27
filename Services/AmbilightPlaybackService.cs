@@ -61,8 +61,37 @@ public class AmbilightPlaybackService
 
             if (debug)
             {
-                _logger.LogInformation("[Ambilight] Play detected for session {SessionId}, item {ItemId}, device {DeviceName}", 
-                    session.Id, info.ItemId, session.DeviceName ?? session.DeviceId);
+                var rawDeviceId = session.DeviceId ?? string.Empty;
+                var normalizedDeviceId = StripDeviceIdTimestamp(rawDeviceId);
+                
+                _logger.LogInformation(
+                    "[Ambilight] Play detected for session {SessionId}, item {ItemId}, device {DeviceName}, deviceId(raw)={RawDeviceId}, deviceId(normalized)={NormalizedDeviceId}", 
+                    session.Id,
+                    info.ItemId,
+                    session.DeviceName ?? rawDeviceId,
+                    rawDeviceId,
+                    normalizedDeviceId);
+
+                if (_config.DeviceMappings?.Count > 0)
+                {
+                    var mappingSummaries = _config.DeviceMappings
+                        .Select(m =>
+                        {
+                            var mappingId = m.DeviceIdentifier ?? string.Empty;
+                            var normalizedMappingId = StripDeviceIdTimestamp(mappingId);
+                            return $"\"{mappingId}\" (normalized=\"{normalizedMappingId}\") → {m.Host}:{m.Port}";
+                        })
+                        .ToList();
+
+                    _logger.LogInformation(
+                        "[Ambilight] Current device mappings ({Count}): {Mappings}",
+                        mappingSummaries.Count,
+                        string.Join("; ", mappingSummaries));
+                }
+                else
+                {
+                    _logger.LogInformation("[Ambilight] No device mappings configured in plugin settings.");
+                }
             }
 
             var item = _libraryManager.GetItemById(info.ItemId);
