@@ -185,11 +185,8 @@ public class AmbilightExtractorService
                     continue;
                 }
 
-                if (item.ExtractionStatus == "failed")
-                {
-                    continue;
-                }
-
+                // Treat any item without a valid binary as pending, including previous failures.
+                // This allows the scheduled task to retry failed extractions explicitly.
                 if (_storage.BinaryExists(item.Id))
                 {
                     continue;
