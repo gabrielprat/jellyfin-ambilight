@@ -532,8 +532,8 @@ the Free Software Foundation, either version 3 of the License, or
                 });
             })();
 
-            // ===== MANAGER TAB LOGIC ===== v1.5.6 - Scheduled Task Integration
-            console.log('[Ambilight] Config v1.5.6 - Scheduled Task Integration');
+            // ===== MANAGER TAB LOGIC ===== v1.5.7 - Scheduled Task Integration
+            console.log('[Ambilight] Config v1.5.7 - Scheduled Task Integration');
             
             let allVideos = [];
             let currentFilter = '';
@@ -681,7 +681,9 @@ the Free Software Foundation, either version 3 of the License, or
                         var opt = document.createElement('option');
                         opt.value = device.id;
                         opt.textContent = device.name;
-                        if (mapping.DeviceIdentifier === device.id) {
+                        // Support both legacy configs (DeviceIdentifier stored as device.id)
+                        // and new configs (DeviceIdentifier stored as device.name).
+                        if (mapping.DeviceIdentifier === device.id || mapping.DeviceIdentifier === device.name) {
                             opt.selected = true;
                         }
                         deviceSelect.appendChild(opt);
@@ -788,19 +790,26 @@ the Free Software Foundation, either version 3 of the License, or
                 
                 rows.forEach(function(row) {
                     var deviceSelect = row.querySelector('.mapping-device');
-                    var device = deviceSelect.value.trim();
+                    var deviceId = deviceSelect.value.trim();
+                    var deviceOption = deviceSelect.options[deviceSelect.selectedIndex];
+                    var deviceName = deviceOption ? deviceOption.textContent.trim() : deviceId;
                     var host = row.querySelector('.mapping-host').value.trim();
                     var port = parseInt(row.querySelector('.mapping-port').value) || 19446;
                     
-                    if (device && host) {
-                        var key = device.toLowerCase() + '|' + host.toLowerCase() + '|' + port;
+                    if (deviceName && host) {
+                        // Use the original Jellyfin device id for duplicate detection when available
+                        var dedupeKeyBase = (deviceId || deviceName).toLowerCase();
+                        var key = dedupeKeyBase + '|' + host.toLowerCase() + '|' + port;
                         
                         if (seen.has(key)) {
-                            var deviceName = deviceSelect.options[deviceSelect.selectedIndex].textContent;
-                            showToast('Warning: Duplicate mapping ignored - Device "' + deviceName + '" → ' + host + ':' + port + ' appears multiple times');
+                            var label = deviceName || deviceId;
+                            showToast('Warning: Duplicate mapping ignored - Device \"' + label + '\" → ' + host + ':' + port + ' appears multiple times');
                         } else {
                             mappings.push({
-                                DeviceIdentifier: device,
+                                // Store the human-readable device name as identifier.
+                                // Playback matching primarily uses DeviceName, which is stable
+                                // even if Jellyfin's internal device ids change.
+                                DeviceIdentifier: deviceName,
                                 Host: host,
                                 Port: port,
                                 TopLedCount: parseInt(row.querySelector('.mapping-top').value) || 89,
