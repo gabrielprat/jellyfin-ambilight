@@ -15,6 +15,14 @@
         "sourceUrl": "https://github.com/gabrielprat/jellyfin-ambilight/releases/download/v1.5.5/jellyfin-plugin-ambilight_1.5.5.zip",
         "checksum": "BC134F9F6D7829B282C13EB0635A5846",
         "timestamp": "2026-02-19T14:23:49Z"
+      },
+      {
+        "version": "1.5.6",
+        "changelog": "# Release Notes - v1.5.6\n\n## 🛠 Pause Sync, Extraction Retries & Debug Logging\n\nThis release fixes ambilight pause/resume behavior, improves the scheduled extraction task to retry failed items, and adds richer debug logging for device mappings.\n\nFor full details see `release-notes/RELEASE_NOTES_v1.5.6.md` in the repository.",
+        "targetAbi": "10.10.0.0",
+        "sourceUrl": "https://github.com/gabrielprat/jellyfin-ambilight/releases/download/v1.5.6/jellyfin-plugin-ambilight_1.5.6.zip",
+        "checksum": "REPLACE_WITH_ACTUAL_CHECKSUM",
+        "timestamp": "2026-02-27T00:00:00Z"
       }
     ]
   }
