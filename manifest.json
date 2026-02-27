@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/gabrielprat/jellyfin-ambilight/master/docs/thumb.png",
     "versions": [
       {
-        "version": "1.5.6",
-        "changelog": "# Release Notes - v1.5.6\n\n## ⏸ Fixed Pause/Resume Ambilight Sync\n\n- Ambilight now correctly pauses its effect when the Jellyfin session is paused and resumes in sync when playback continues.\n- Playback pause state is now wired through the playback progress events into the in-process player, so LEDs hold the last video frame instead of continuing to advance.\n\n## 🧵 Scheduled Task Retries Failed Extractions\n\n- The **Extract Pending Ambilight Data** scheduled task now also includes items whose extraction previously failed, as long as no valid binary exists.\n- This allows you to re-run the task to automatically retry failed extractions without manual cleanup.\n\n## 🪵 Improved Debug Logging for Device Mappings\n\n- When **Debug** is enabled and a play session starts, logs now include:\n  - The current device ID in both raw and **normalized (timestamp-stripped)** form.\n  - A summary of all configured device mappings, including their normalized identifiers and WLED targets.\n- This makes it easier to diagnose cases where a device-to-WLED mapping is not being matched as expected.\n\n",
+        "version": "1.5.7",
+        "changelog": "# Release Notes - v1.5.7\n\n## 🎯 Device Mapping Matching Fix\n\n- Device mappings created from the settings UI now store the **human-readable device name** instead of Jellyfin's internal device ID.\n- Playback matching uses the current session's `DeviceName`, so mappings remain stable even if Jellyfin changes internal device IDs.\n- Existing mappings that were created with internal IDs will still load in the UI, but you may want to re-select the device in the dropdown and save to migrate them to the new, name-based identifiers.\n\n## 📦 Installation & Upgrade\n\n- For installation and upgrade instructions, see the `INSTALLATION.md` file in the repository.\n- After upgrading:\n  1. Restart Jellyfin.\n  2. Open the Ambilight plugin settings, review your **Device Mappings**, and re-save them if needed so they use device names.\n\n",
         "targetAbi": "10.10.0.0",
-        "sourceUrl": "https://github.com/gabrielprat/jellyfin-ambilight/releases/download/v1.5.6/jellyfin-plugin-ambilight_1.5.6.zip",
-        "checksum": "E4DD4632A1FB13DD122D57B7F5092D02",
-        "timestamp": "2026-02-27T10:25:55Z"
+        "sourceUrl": "https://github.com/gabrielprat/jellyfin-ambilight/releases/download/v1.5.7/jellyfin-plugin-ambilight_1.5.7.zip",
+        "checksum": "B501C4CD3B630BF70F0C3491D2CAD66C",
+        "timestamp": "2026-02-27T14:20:51Z"
       },
       {
         "version": "1.5.7",
