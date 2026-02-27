@@ -3,8 +3,8 @@
     <TargetFramework>net8.0</TargetFramework>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
     <AssemblyName>Jellyfin.Plugin.Ambilight</AssemblyName>
-    <AssemblyVersion>1.5.7</AssemblyVersion>
-    <FileVersion>1.5.7</FileVersion>
+    <AssemblyVersion>1.5.8</AssemblyVersion>
+    <FileVersion>1.5.8</FileVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
