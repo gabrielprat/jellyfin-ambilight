@@ -123,6 +123,7 @@ public class AmbilightController : ControllerBase
                 int extractionProgress = 0;
                 ulong extractionFramesCurrent = 0;
                 ulong extractionFramesTotal = 0;
+                string? binaryFormat = null;
 
                 if (entryPoint?.Storage != null)
                 {
@@ -133,6 +134,7 @@ public class AmbilightController : ControllerBase
                         extractionProgress = ambiItem.ExtractionProgress;
                         extractionFramesCurrent = ambiItem.ExtractionFramesCurrent;
                         extractionFramesTotal = ambiItem.ExtractionFramesTotal;
+                        binaryFormat = ambiItem.BinaryFormat;
                     }
                 }
 
@@ -146,7 +148,8 @@ public class AmbilightController : ControllerBase
                     ExtractionStatus = extractionStatus,
                     ExtractionProgress = extractionProgress,
                     ExtractionFramesCurrent = extractionFramesCurrent,
-                    ExtractionFramesTotal = extractionFramesTotal
+                    ExtractionFramesTotal = extractionFramesTotal,
+                    BinaryFormat = binaryFormat
                 };
             }
 
@@ -219,6 +222,7 @@ public class AmbilightController : ControllerBase
             int extractionProgress = 0;
             ulong extractionFramesCurrent = 0;
             ulong extractionFramesTotal = 0;
+            string? binaryFormat = null;
             
             if (entryPoint?.Storage != null)
             {
@@ -229,6 +233,7 @@ public class AmbilightController : ControllerBase
                     extractionProgress = ambiItem.ExtractionProgress;
                     extractionFramesCurrent = ambiItem.ExtractionFramesCurrent;
                     extractionFramesTotal = ambiItem.ExtractionFramesTotal;
+                    binaryFormat = ambiItem.BinaryFormat;
                     
                     // Debug logging
                     if (extractionStatus == "extracting")
@@ -256,7 +261,8 @@ public class AmbilightController : ControllerBase
                 ExtractionStatus = extractionStatus,
                 ExtractionProgress = extractionProgress,
                 ExtractionFramesCurrent = extractionFramesCurrent,
-                ExtractionFramesTotal = extractionFramesTotal
+                ExtractionFramesTotal = extractionFramesTotal,
+                BinaryFormat = binaryFormat
             };
 
             return Ok(status);
@@ -492,6 +498,7 @@ public class AmbilightStatusResponse
     public int ExtractionProgress { get; set; }
     public ulong ExtractionFramesCurrent { get; set; }
     public ulong ExtractionFramesTotal { get; set; }
+    public string? BinaryFormat { get; set; }
 }
 
 public class AmbilightExtractResponse

@@ -88,6 +88,34 @@ the Free Software Foundation, either version 3 of the License, or
                         <div class="fieldDescription">Hardware-accelerated video decoding for faster extraction. 'Auto' uses CPU decoding with automatic fallback - most compatible. Select specific hardware only if you know your system supports it.</div>
                     </div>
 
+                    <h3 style="margin-top: 2em; margin-bottom: 1em; font-size: 1.1em; font-weight: 500;">AMB3 Format Settings</h3>
+
+                    <div class="fieldDescription" style="margin-bottom: 1em;">
+                        Controls for the AMb3 binary format used by new extractions. Existing AMb2 files are played back transparently.
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1em; margin-bottom: 1em;">
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="Amb3ChapterSizeFrames">Chapter size (frames)</label>
+                            <input id="Amb3ChapterSizeFrames" type="number" is="emby-input" min="8" max="240" />
+                            <div class="fieldDescription">Frames per compression chapter. Default 48 (~2s at 24fps).</div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="Amb3DeltaThreshold">Delta threshold</label>
+                            <input id="Amb3DeltaThreshold" type="number" is="emby-input" min="1" max="128" />
+                            <div class="fieldDescription">Per-LED RGB difference to store as delta. Default 10.</div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="checkboxContainer">
+                                <input id="Amb3DeltaFallbackToKeyframe" type="checkbox" is="emby-checkbox" />
+                                <span>Fallback to keyframe when >50% LEDs changed</span>
+                            </label>
+                            <div class="fieldDescription">When delta encoding would store most LEDs anyway, write a keyframe instead.</div>
+                        </div>
+                    </div>
+
                     <h3 style="margin-top: 2em; margin-bottom: 1em; font-size: 1.1em; font-weight: 500;">Extraction LED Configuration</h3>
                     
                     <div class="fieldDescription" style="margin-bottom: 1em;">
@@ -344,6 +372,11 @@ the Free Software Foundation, either version 3 of the License, or
                         document.querySelector('#AmbilightSmoothSeconds').value = (config.AmbilightSmoothSeconds != null ? config.AmbilightSmoothSeconds : 0.12);
                         document.querySelector('#Debug').checked = config.Debug === true;
 
+                        // AMb3 format settings
+                        document.querySelector('#Amb3ChapterSizeFrames').value = config.Amb3ChapterSizeFrames || 48;
+                        document.querySelector('#Amb3DeltaThreshold').value = config.Amb3DeltaThreshold || 10;
+                        document.querySelector('#Amb3DeltaFallbackToKeyframe').checked = config.Amb3DeltaFallbackToKeyframe !== false;
+
                         // Extraction LED configuration
                         document.querySelector('#AmbilightTopLedCount').value = config.AmbilightTopLedCount;
                         document.querySelector('#AmbilightBottomLedCount').value = config.AmbilightBottomLedCount;
@@ -383,6 +416,11 @@ the Free Software Foundation, either version 3 of the License, or
                     config.AmbilightDataFolder = document.querySelector('#AmbilightDataFolder').value || '/data/ambilight';
                     config.AmbilightSmoothSeconds = parseFloat(document.querySelector('#AmbilightSmoothSeconds').value || '0.12');
                     config.Debug = document.querySelector('#Debug').checked === true;
+
+                    // AMb3 format settings
+                    config.Amb3ChapterSizeFrames = parseInt(document.querySelector('#Amb3ChapterSizeFrames').value) || 48;
+                    config.Amb3DeltaThreshold = parseInt(document.querySelector('#Amb3DeltaThreshold').value) || 10;
+                    config.Amb3DeltaFallbackToKeyframe = document.querySelector('#Amb3DeltaFallbackToKeyframe').checked === true;
 
                     // Extraction LED configuration
                     config.AmbilightTopLedCount = document.querySelector('#AmbilightTopLedCount').value;
