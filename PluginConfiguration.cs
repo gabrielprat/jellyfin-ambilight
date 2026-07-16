@@ -63,6 +63,22 @@ namespace Jellyfin.Plugin.Ambilight
         /// </summary>
         public string AmbilightDataFolder { get; set; } = "/data/ambilight";
 
+        // AMb3 extraction settings
+        /// <summary>
+        /// Number of frames per AMb3 chapter (~2s at 24fps with default 48).
+        /// </summary>
+        public int Amb3ChapterSizeFrames { get; set; } = 48;
+
+        /// <summary>
+        /// Per-LED RGB difference threshold to consider an LED "changed" for delta encoding.
+        /// </summary>
+        public int Amb3DeltaThreshold { get; set; } = 10;
+
+        /// <summary>
+        /// When true, delta chunks fall back to keyframe if average LED change exceeds 50%.
+        /// </summary>
+        public bool Amb3DeltaFallbackToKeyframe { get; set; } = true;
+
         /// <summary>
         /// When true, enables verbose logging for play/pause/seek, binary load, WLED connection and broadcast.
         /// </summary>
