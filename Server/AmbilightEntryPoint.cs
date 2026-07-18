@@ -31,6 +31,7 @@ namespace Jellyfin.Plugin.Ambilight.Server;
 public class AmbilightEntryPoint : IHostedService
 {
     private readonly ILogger<AmbilightEntryPoint> _logger;
+    private readonly ILoggerFactory _loggerFactory;
     private readonly ILibraryManager _libraryManager;
     private readonly ISessionManager _sessionManager;
     private readonly IApplicationPaths _appPaths;
@@ -49,11 +50,13 @@ public class AmbilightEntryPoint : IHostedService
 
     public AmbilightEntryPoint(
         ILogger<AmbilightEntryPoint> logger,
+        ILoggerFactory loggerFactory,
         ILibraryManager libraryManager,
         ISessionManager sessionManager,
         IApplicationPaths appPaths)
     {
         _logger = logger;
+        _loggerFactory = loggerFactory;
         _libraryManager = libraryManager;
         _sessionManager = sessionManager;
         _appPaths = appPaths;
@@ -68,12 +71,13 @@ public class AmbilightEntryPoint : IHostedService
         
         Instance = this;
         
-        // Create logger factory for services (we're already using Microsoft.Extensions.Logging)
-        var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
-        var storageLogger = loggerFactory.CreateLogger<AmbilightStorageService>();
-        var extractorLogger = loggerFactory.CreateLogger<AmbilightExtractorService>();
-        var playbackLogger = loggerFactory.CreateLogger<AmbilightPlaybackService>();
-        var extractorCoreLogger = loggerFactory.CreateLogger<AmbilightInProcessExtractor>();
+        // Use Jellyfin's injected logger factory so service logs reach the server log file
+        // and the dashboard log viewer. Creating a factory here (e.g. LoggerFactory.Create)
+        // would build a private pipeline whose output only ever lands on raw stdout.
+        var storageLogger = _loggerFactory.CreateLogger<AmbilightStorageService>();
+        var extractorLogger = _loggerFactory.CreateLogger<AmbilightExtractorService>();
+        var playbackLogger = _loggerFactory.CreateLogger<AmbilightPlaybackService>();
+        var extractorCoreLogger = _loggerFactory.CreateLogger<AmbilightInProcessExtractor>();
 
         _storage = new AmbilightStorageService(storageLogger, _config);
         _storage.CleanupStuckExtractions();
