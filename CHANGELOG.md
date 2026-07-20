@@ -2,6 +2,12 @@
 
 All notable changes to the Jellyfin Ambilight Plugin will be documented in this file.
 
+## [2.0.0] - Unreleased
+
+### Changed
+- **Smoothing window default** — Changed from 0.12s to 0.06s for more responsive color transitions.
+- **Removed Brightness target, Min LED brightness, and R/G/B boost settings** — These settings caused blue color tint in dark scenes. Visual tuning now consists of gamma (global + per-channel), saturation, and smoothing only.
+
 ## [1.7.0] - 2026-03-07
 
 ### Changed
@@ -47,7 +53,7 @@ All notable changes to the Jellyfin Ambilight Plugin will be documented in this 
 - **Device ID normalization** - Automatic handling of Jellyfin web client device ID timestamps
 - **Real-time playback synchronization** - Pause, resume, and seek support
 - **Loading and failure effects** - Visual feedback when starting playback or on errors
-- **Configurable visual tuning** - Gamma, saturation, brightness, color boosts, and smoothing
+- **Configurable visual tuning** - Gamma, saturation, and smoothing
 - **AMb2 binary format** - Efficient compressed format for ambilight data
 
 ### Technical Details

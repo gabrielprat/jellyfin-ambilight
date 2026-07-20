@@ -142,13 +142,10 @@ Configure which Jellyfin devices should trigger ambilight effects and where to s
 
 Fine-tune the appearance and behavior of your ambilight effects:
 
-- **Smoothing window** - Time window for temporal smoothing between frames in seconds (default: 0.12). Set to 0 to disable. Higher values = smoother but more delayed; lower values = more responsive but can flicker on rapid cuts
+- **Smoothing window** - Time window for temporal smoothing between frames in seconds (default: 0.06). Set to 0 to disable. Higher values = smoother but more delayed; lower values = more responsive but can flicker on rapid cuts
 - **Base gamma** - Overall gamma curve (default: 2.2). Higher values make mid-tones and highlights darker
 - **Saturation** - Color saturation multiplier (default: 1.0). Higher = more vivid colors
-- **Brightness target** - Target average LED brightness (default: 60)
 - **Red/Green/Blue gamma** - Per-channel gamma correction to balance colors
-- **Red/Green/Blue boost** - Minimum floor for each color when LEDs are dim
-- **Min LED brightness** - Global minimum LED brightness (0 = true black)
 
 #### Debug
 

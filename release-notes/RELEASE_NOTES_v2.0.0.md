@@ -45,6 +45,17 @@ New compressed binary format that dramatically reduces storage requirements whil
 - Added runtime format detection for files without metadata
 - Improved stuck extraction cleanup on startup
 
+## Simplified Visual Settings
+
+Removed settings that caused blue color tint in dark scenes with no practical benefit:
+
+- **Removed Brightness target** — automatic brightness normalization was amplifying blue bias in dark scenes
+- **Removed Min LED brightness** — non-zero floor forced LEDs to emit light, tinting dark scenes blue
+- **Removed Red/Green/Blue boost** — dependent on Min LED brightness, removed together
+- **Smoothing window default changed** from 0.12s to 0.06s for more responsive color transitions
+
+Visual tuning now consists of: gamma (global + per-channel), saturation, and smoothing — all color-neutral settings that don't introduce bias in dark content.
+
 ## Bug Fixes
 
 - Fixed plugin icon display in Jellyfin

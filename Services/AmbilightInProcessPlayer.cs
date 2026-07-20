@@ -450,15 +450,10 @@ public sealed class AmbilightInProcessPlayer : IDisposable
 
             float gammaBase = (float)cfg.AmbilightGamma;
             float saturation = (float)cfg.AmbilightSaturation;
-            float brightnessTarget = (float)cfg.AmbilightBrightnessTarget;
             // Guard per-channel gamma against invalid/unstable values from persisted config.
             float gammaRed = ClampF((float)cfg.AmbilightGammaRed, 0.1f, 5.0f);
             float gammaGreen = ClampF((float)cfg.AmbilightGammaGreen, 0.1f, 5.0f);
             float gammaBlue = ClampF((float)cfg.AmbilightGammaBlue, 0.1f, 5.0f);
-            float redBoost = (float)cfg.AmbilightRedBoost;
-            float greenBoost = (float)cfg.AmbilightGreenBoost;
-            float blueBoost = (float)cfg.AmbilightBlueBoost;
-            float minLedBrightness = (float)cfg.AmbilightMinLedBrightness;
             int inputPosition = mapping.InputPosition;
 
             int rotLeds = totalTgt > 0 ? Math.Abs(inputPosition) % totalTgt : 0;
@@ -641,15 +636,6 @@ public sealed class AmbilightInProcessPlayer : IDisposable
                 var outFrame = new byte[totalTgt * bytesPerLed];
 
                 float sUser = ClampF(saturation, 0.0f, 5.0f);
-                float bTarget = Math.Max(1.0f, brightnessTarget);
-                float minB = Math.Max(0.0f, minLedBrightness);
-
-                float brightnessFactor = 1.0f;
-                if (avgLum > 1.0f)
-                {
-                    float factor = (bTarget / avgLum) * 0.7f + 0.3f;
-                    brightnessFactor = ClampF(factor, 0.05f, 2.5f);
-                }
 
                 for (int t = 0; t < totalTgt; t++)
                 {
@@ -678,36 +664,18 @@ public sealed class AmbilightInProcessPlayer : IDisposable
                     float gG = ClampF((float)MathF.Pow(gSat, invGamma), 0.0f, 1.0f);
                     float bG = ClampF((float)MathF.Pow(bSat, invGamma), 0.0f, 1.0f);
 
-                    float brightnessFactorAdj = ClampF(brightnessFactor, 0.3f, 1.8f);
-                    float rF = rG * brightnessFactorAdj * 255.0f;
-                    float gF = gG * brightnessFactorAdj * 255.0f;
-                    float bF = bG * brightnessFactorAdj * 255.0f;
+                    float rF = rG * 255.0f;
+                    float gF = gG * 255.0f;
+                    float bF = bG * 255.0f;
 
                     int @base = t * bytesPerLed;
                     acc[@base] = acc[@base] * (1.0f - k) + rF * k;
                     acc[@base + 1] = acc[@base + 1] * (1.0f - k) + gF * k;
                     acc[@base + 2] = acc[@base + 2] * (1.0f - k) + bF * k;
 
-                    // Match Rust: round smoothed accumulator before min clamp and output (avoids truncation bias / blue tint)
                     float rOut = MathF.Round(acc[@base]);
                     float gOut = MathF.Round(acc[@base + 1]);
                     float bOut = MathF.Round(acc[@base + 2]);
-
-                    float minR = minB * redBoost;
-                    float minG = minB * greenBoost;
-                    float minBB = minB * blueBoost;
-
-                    if (rOut > 0.0f && rOut < minR) rOut = minR;
-                    if (gOut > 0.0f && gOut < minG) gOut = minG;
-                    if (bOut > 0.0f && bOut < minBB) bOut = minBB;
-
-                    float lumLed = 0.2126f * rOut + 0.7152f * gOut + 0.0722f * bOut;
-                    if (lumLed < minB * 0.5f)
-                    {
-                        rOut = 0.0f;
-                        gOut = 0.0f;
-                        bOut = 0.0f;
-                    }
 
                     // Round before cast to byte to match Rust (truncation was darkening and boosting blue floor)
                     // Send RGB order - WLED handles color order remapping based on its own configuration

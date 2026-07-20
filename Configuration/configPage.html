@@ -153,7 +153,9 @@ the Free Software Foundation, either version 3 of the License, or
                         <label class="inputLabel inputLabelUnfocused" for="AmbilightSmoothSeconds">Smoothing window (seconds)</label>
                         <input id="AmbilightSmoothSeconds" type="number" is="emby-input" step="0.01" />
                         <div class="fieldDescription">
-                            Time window for temporal smoothing between frames, in seconds (default 0.12). Set to 0 to disable smoothing. Higher values = smoother but more delayed; lower values = more responsive but can flicker on rapid cuts.
+                            Time window for temporal smoothing between frames, in seconds (default 0.06). Set to 0 to disable
+                            smoothing. Higher values = smoother but more delayed; lower values = more responsive but can flicker
+                            on rapid cuts.
                         </div>
                     </div>
 
@@ -170,14 +172,6 @@ the Free Software Foundation, either version 3 of the License, or
                         <input id="AmbilightSaturation" type="number" is="emby-input" step="0.1" />
                         <div class="fieldDescription">
                             Color saturation multiplier (default 1.0). Higher values make colors more vivid; lower values make them more muted and neutral.
-                        </div>
-                    </div>
-
-                    <div class="inputContainer">
-                        <label class="inputLabel inputLabelUnfocused" for="AmbilightBrightnessTarget">Brightness target</label>
-                        <input id="AmbilightBrightnessTarget" type="number" is="emby-input" step="1" />
-                        <div class="fieldDescription">
-                            Target average LED brightness (default 60). Higher values make the overall effect brighter; lower values dim the strip while still adapting per scene.
                         </div>
                     </div>
 
@@ -202,38 +196,6 @@ the Free Software Foundation, either version 3 of the License, or
                         <input id="AmbilightGammaBlue" type="number" is="emby-input" step="0.1" />
                         <div class="fieldDescription">
                             Per‑channel gamma for blue. Higher = darker blues; lower = brighter blues. Increase this if the image looks too blue.
-                        </div>
-                    </div>
-
-                    <div class="inputContainer">
-                        <label class="inputLabel inputLabelUnfocused" for="AmbilightRedBoost">Red boost</label>
-                        <input id="AmbilightRedBoost" type="number" is="emby-input" step="0.1" />
-                        <div class="fieldDescription">
-                            Minimum floor for red when LEDs are dim (used with Min LED brightness). Higher values keep red visible in dark scenes; too high can tint blacks towards red.
-                        </div>
-                    </div>
-
-                    <div class="inputContainer">
-                        <label class="inputLabel inputLabelUnfocused" for="AmbilightGreenBoost">Green boost</label>
-                        <input id="AmbilightGreenBoost" type="number" is="emby-input" step="0.1" />
-                        <div class="fieldDescription">
-                            Minimum floor for green when LEDs are dim. Higher values keep green present in shadows; too high can give a greenish cast to dark areas.
-                        </div>
-                    </div>
-
-                    <div class="inputContainer">
-                        <label class="inputLabel inputLabelUnfocused" for="AmbilightBlueBoost">Blue boost</label>
-                        <input id="AmbilightBlueBoost" type="number" is="emby-input" step="0.1" />
-                        <div class="fieldDescription">
-                            Minimum floor for blue when LEDs are dim. Higher values keep blue visible in dark scenes; too high makes everything look cold/blue.
-                        </div>
-                    </div>
-
-                    <div class="inputContainer">
-                        <label class="inputLabel inputLabelUnfocused" for="AmbilightMinLedBrightness">Min LED brightness</label>
-                        <input id="AmbilightMinLedBrightness" type="number" is="emby-input" step="0.1" />
-                        <div class="fieldDescription">
-                            Global minimum LED brightness (0 = true black). Higher values prevent LEDs from turning fully off, but combined with color boosts can introduce a color tint in very dark scenes.
                         </div>
                     </div>
 
@@ -342,7 +304,7 @@ the Free Software Foundation, either version 3 of the License, or
                         document.querySelector('#MaxConcurrentExtractions').value = config.MaxConcurrentExtractions || 1;
                         document.querySelector('#HardwareAcceleration').value = config.HardwareAcceleration || 'auto';
                         document.querySelector('#AmbilightDataFolder').value = config.AmbilightDataFolder || '/data/ambilight';
-                        document.querySelector('#AmbilightSmoothSeconds').value = (config.AmbilightSmoothSeconds != null ? config.AmbilightSmoothSeconds : 0.12);
+                        document.querySelector('#AmbilightSmoothSeconds').value = (config.AmbilightSmoothSeconds != null ? config.AmbilightSmoothSeconds : 0.06);
                         document.querySelector('#Debug').checked = config.Debug === true;
 
                         // Extraction LED configuration
@@ -352,16 +314,11 @@ the Free Software Foundation, either version 3 of the License, or
                         document.querySelector('#AmbilightRightLedCount').value = config.AmbilightRightLedCount;
                         document.querySelector('#AmbilightGamma').value = config.AmbilightGamma;
                         document.querySelector('#AmbilightSaturation').value = config.AmbilightSaturation;
-                        document.querySelector('#AmbilightBrightnessTarget').value = config.AmbilightBrightnessTarget;
 
-                        // Per-channel gamma and boosts
+                        // Per-channel gamma
                         document.querySelector('#AmbilightGammaRed').value = config.AmbilightGammaRed;
                         document.querySelector('#AmbilightGammaGreen').value = config.AmbilightGammaGreen;
                         document.querySelector('#AmbilightGammaBlue').value = config.AmbilightGammaBlue;
-                        document.querySelector('#AmbilightRedBoost').value = config.AmbilightRedBoost;
-                        document.querySelector('#AmbilightGreenBoost').value = config.AmbilightGreenBoost;
-                        document.querySelector('#AmbilightBlueBoost').value = config.AmbilightBlueBoost;
-                        document.querySelector('#AmbilightMinLedBrightness').value = config.AmbilightMinLedBrightness;
 
                         // Populate excluded libraries and device list for mappings
                         loadLibraries(config);
@@ -382,7 +339,7 @@ the Free Software Foundation, either version 3 of the License, or
                     config.MaxConcurrentExtractions = parseInt(document.querySelector('#MaxConcurrentExtractions').value) || 1;
                     config.HardwareAcceleration = document.querySelector('#HardwareAcceleration').value || 'auto';
                     config.AmbilightDataFolder = document.querySelector('#AmbilightDataFolder').value || '/data/ambilight';
-                    config.AmbilightSmoothSeconds = parseFloat(document.querySelector('#AmbilightSmoothSeconds').value || '0.12');
+                    config.AmbilightSmoothSeconds = parseFloat(document.querySelector('#AmbilightSmoothSeconds').value || '0.06');
                     config.Debug = document.querySelector('#Debug').checked === true;
 
                     // Extraction LED configuration
@@ -392,15 +349,11 @@ the Free Software Foundation, either version 3 of the License, or
                     config.AmbilightRightLedCount = document.querySelector('#AmbilightRightLedCount').value;
                     config.AmbilightGamma = document.querySelector('#AmbilightGamma').value;
                     config.AmbilightSaturation = document.querySelector('#AmbilightSaturation').value;
-                    config.AmbilightBrightnessTarget = document.querySelector('#AmbilightBrightnessTarget').value;
 
+                    // Per-channel gamma
                     config.AmbilightGammaRed = document.querySelector('#AmbilightGammaRed').value;
                     config.AmbilightGammaGreen = document.querySelector('#AmbilightGammaGreen').value;
                     config.AmbilightGammaBlue = document.querySelector('#AmbilightGammaBlue').value;
-                    config.AmbilightRedBoost = document.querySelector('#AmbilightRedBoost').value;
-                    config.AmbilightGreenBoost = document.querySelector('#AmbilightGreenBoost').value;
-                    config.AmbilightBlueBoost = document.querySelector('#AmbilightBlueBoost').value;
-                    config.AmbilightMinLedBrightness = document.querySelector('#AmbilightMinLedBrightness').value;
 
                     // Device mappings
                     config.DeviceMappings = collectDeviceMappings();

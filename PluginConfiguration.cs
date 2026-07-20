@@ -38,20 +38,13 @@ namespace Jellyfin.Plugin.Ambilight
         /// Set to 0 to disable smoothing entirely.
         /// Higher values = smoother but more lag; lower values = more responsive but can flicker.
         /// </summary>
-        public double AmbilightSmoothSeconds { get; set; } = 0.12;
+        public double AmbilightSmoothSeconds { get; set; } = 0.06;
         public double AmbilightGamma { get; set; } = 2.2;
         public double AmbilightSaturation { get; set; } = 1.0;
-        public double AmbilightBrightnessTarget { get; set; } = 60.0;
         
         public double AmbilightGammaRed { get; set; } = 1.0;
         public double AmbilightGammaGreen { get; set; } = 1.0;
         public double AmbilightGammaBlue { get; set; } = 1.0;
-        
-        public double AmbilightRedBoost { get; set; } = 0.0;
-        public double AmbilightBlueBoost { get; set; } = 0.0;
-        public double AmbilightGreenBoost { get; set; } = 0.0;
-        
-        public double AmbilightMinLedBrightness { get; set; } = 0.0;
 
         /// <summary>
         /// Libraries (by Id) that should be excluded from extraction.
