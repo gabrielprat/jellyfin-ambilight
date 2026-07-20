@@ -1,6 +1,6 @@
 # Jellyfin Ambilight Plugin
 
-**Version:** 2.1.0
+**Version:** 2.2.0
 
 Transform your Jellyfin viewing experience with synchronized ambient lighting! This plugin automatically creates immersive ambilight effects for your movies and TV shows by controlling WLED-compatible LED strips.
 
@@ -24,6 +24,27 @@ Ambilight creates ambient lighting that matches the colors on your screen edges,
 - WLED-compatible LED controller
 - LED strips installed around your TV/monitor
 - Docker volume (if running Jellyfin in Docker)
+
+## WLED Network Requirements
+
+The plugin streams raw RGB frames over UDP to WLED's **Hyperion raw-RGB handler on port 19446**. This port is hardcoded in WLED and cannot be changed — the plugin always targets it automatically.
+
+### UDP Packet Size Limit
+
+WLED's UDP handler has a **1472-byte hard limit** per packet (standard UDP MTU). Each LED requires 3 bytes (RGB), so a single packet can carry at most **490 LEDs** (490 × 3 = 1470 bytes).
+
+**For setups with more than 490 total LEDs**, split your strip across **multiple WLED instances**, each handling ≤490 LEDs. For example, an 832-LED strip could be driven by two WLED controllers (e.g., 416 LEDs each), with both mapped to the same Jellyfin device.
+
+### Why Port 19446?
+
+WLED exposes two UDP listeners:
+
+| Port | Handler | Protocol | Notes |
+|------|---------|----------|-------|
+| **19446** | Hyperion raw RGB | Raw bytes, no header | **Optimized for streaming**, zero protocol overhead. Used by this plugin. |
+| 21324 | Notifier / UDP Realtime | Protocol-wrapped (DRGB/DNRGB) | Shares socket with WLED sync, calls `strip.show()` per packet, adds ~100ms latency for large strips. Not suitable for ambilight. |
+
+Port 19446 is the only correct target for real-time ambilight streaming.
 
 ## Installation
 
@@ -119,8 +140,7 @@ Configure which Jellyfin devices should trigger ambilight effects and where to s
 1. Click **"Add Device Mapping"** to create a new mapping
 2. **Select device** - Choose from your registered Jellyfin devices (e.g., "Living Room TV")
 3. **Enter WLED host** - IP address of your WLED controller (e.g., `192.168.1.100`)
-4. **Set port** - Default: `19446` (WLED's standard UDP port)
-5. **Configure LED layout** for this specific WLED instance:
+4. **Configure LED layout** for this specific WLED instance:
    - **Top/Bottom/Left/Right LED counts** - Number of LEDs on each edge of your screen
    - **Input Position** - Starting index of your LED strip in clockwise order from the viewer perspective:
      - `0` = top-left LED
@@ -128,8 +148,8 @@ Configure which Jellyfin devices should trigger ambilight effects and where to s
      - continue clockwise around the screen
    - **Gap Length** - Number of inactive LEDs at the gap position (include in the corresponding edge's LED count). Set to0 for no gap.
    - **Gap Position** - LED index where the gap starts, counting from 0 at top-left, clockwise (same coordinate system as Input Position). For example, if Top=50 and Right=25, the start of the bottom edge is index75.
-6. **Save** - Click the Save button at the bottom
-7. **Repeat** - Add more mappings as needed
+5. **Save** - Click the Save button at the bottom
+6. **Repeat** - Add more mappings as needed
 
 **Important:** The plugin automatically handles device ID variations (e.g., session timestamps) so your mappings will work across multiple playback sessions from the same device.
 
@@ -241,9 +261,9 @@ The plugin supports unlimited device-to-WLED mappings:
 3. Perfect for wraparound lighting, ceiling effects, or multi-strip setups
 
 **Example: Theater room with 3 WLED controllers:**
-- Map "Theater Room" → `192.168.1.102:19446` (screen LEDs)
-- Map "Theater Room" → `192.168.1.103:19446` (wall LEDs)
-- Map "Theater Room" → `192.168.1.104:19446` (ceiling LEDs)
+- Map "Theater Room" → `192.168.1.102` (screen LEDs)
+- Map "Theater Room" → `192.168.1.103` (wall LEDs)
+- Map "Theater Room" → `192.168.1.104` (ceiling LEDs)
 
 When playing on "Theater Room", all 3 WLED instances receive synchronized color data!
 

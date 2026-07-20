@@ -90,8 +90,7 @@ namespace Jellyfin.Plugin.Ambilight
     {
         public string DeviceIdentifier { get; set; } = string.Empty;
         public string Host { get; set; } = string.Empty;
-        public int Port { get; set; } = 19446;
-        
+
         // LED Layout Configuration (per WLED instance)
         public int TopLedCount { get; set; } = 89;
         public int BottomLedCount { get; set; } = 89;

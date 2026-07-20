@@ -488,8 +488,8 @@ the Free Software Foundation, either version 3 of the License, or
                 });
             })();
 
-            // ===== MANAGER TAB LOGIC ===== v1.7.0 - RGB-only extraction
-            console.log('[Ambilight] Config v1.7.0 - RGB-only extraction');
+            // ===== MANAGER TAB LOGIC ===== v2.2.0 - RGB-only extraction
+            console.log('[Ambilight] Config v2.2.0 - RGB-only extraction');
             
             let allVideos = [];
             let currentFilter = '';
@@ -613,7 +613,7 @@ the Free Software Foundation, either version 3 of the License, or
                 wrapper.style.cssText = 'margin-bottom: 1.5em; padding: 1em; background: rgba(255,255,255,0.05); border-radius: 8px; border-left: 3px solid var(--theme-primary-color);';
                 wrapper.setAttribute('data-mapping-index', index);
                 
-                // Header row with device, host, port, remove
+                // Header row with device, host, remove
                 var headerRow = document.createElement('div');
                 headerRow.style.cssText = 'display: flex; gap: 0.5em; align-items: center; margin-bottom: 1em;';
                 
@@ -657,18 +657,6 @@ the Free Software Foundation, either version 3 of the License, or
                 hostInput.value = mapping.Host || '';
                 hostInput.style.cssText = 'flex: 2;';
                 headerRow.appendChild(hostInput);
-                
-                // Create port input
-                var portInput = document.createElement('input');
-                portInput.type = 'number';
-                portInput.className = 'mapping-port emby-input';
-                portInput.setAttribute('is', 'emby-input');
-                portInput.placeholder = '19446';
-                portInput.value = mapping.Port || 19446;
-                portInput.min = '1';
-                portInput.max = '65535';
-                portInput.style.cssText = 'flex: 1; max-width: 100px;';
-                headerRow.appendChild(portInput);
                 
                 // Create remove button
                 var removeBtn = document.createElement('button');
@@ -780,7 +768,7 @@ the Free Software Foundation, either version 3 of the License, or
                 }
                 
                 var index = container.children.length;
-                addMappingRow(container, { DeviceIdentifier: '', Host: '', Port: 19446 }, index);
+                addMappingRow(container, { DeviceIdentifier: '', Host: '' }, index);
             });
             
             function collectDeviceMappings() {
@@ -789,7 +777,7 @@ the Free Software Foundation, either version 3 of the License, or
                 
                 var mappings = [];
                 var rows = container.querySelectorAll('[data-mapping-index]');
-                var seen = new Set(); // Track device+host+port combinations
+                var seen = new Set(); // Track device+host combinations
                 
                 rows.forEach(function(row) {
                     var deviceSelect = row.querySelector('.mapping-device');
@@ -797,16 +785,15 @@ the Free Software Foundation, either version 3 of the License, or
                     var deviceOption = deviceSelect.options[deviceSelect.selectedIndex];
                     var deviceName = deviceOption ? deviceOption.textContent.trim() : deviceId;
                     var host = row.querySelector('.mapping-host').value.trim();
-                    var port = parseInt(row.querySelector('.mapping-port').value) || 19446;
                     
                     if (deviceName && host) {
                         // Use the original Jellyfin device id for duplicate detection when available
                         var dedupeKeyBase = (deviceId || deviceName).toLowerCase();
-                        var key = dedupeKeyBase + '|' + host.toLowerCase() + '|' + port;
+                        var key = dedupeKeyBase + '|' + host.toLowerCase();
                         
                         if (seen.has(key)) {
                             var label = deviceName || deviceId;
-                            showToast('Warning: Duplicate mapping ignored - Device \"' + label + '\" → ' + host + ':' + port + ' appears multiple times');
+                            showToast('Warning: Duplicate mapping ignored - Device \"' + label + '\" → ' + host + ' appears multiple times');
                         } else {
                             mappings.push({
                                 // Store the human-readable device name as identifier.
@@ -814,7 +801,6 @@ the Free Software Foundation, either version 3 of the License, or
                                 // even if Jellyfin's internal device ids change.
                                 DeviceIdentifier: deviceName,
                                 Host: host,
-                                Port: port,
                                 TopLedCount: parseInt(row.querySelector('.mapping-top').value) || 89,
                                 BottomLedCount: parseInt(row.querySelector('.mapping-bottom').value) || 89,
                                 LeftLedCount: parseInt(row.querySelector('.mapping-left').value) || 49,

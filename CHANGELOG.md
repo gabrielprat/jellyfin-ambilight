@@ -2,13 +2,14 @@
 
 All notable changes to the Jellyfin Ambilight Plugin will be documented in this file.
 
-## [2.1.0] - Unreleased
+## [2.2.0] - Unreleased
 
 ### Added
 - **LED strip gap configuration** — Per-device `Gap Length` and `Gap Position` settings to handle physical LED strips with a data cable gap at any position. Gap LEDs are zeroed out in the output frame after Input Position rotation, matching HyperHDR's gap feature.
+- **WLED network requirements documentation** — README now documents UDP port 19446, the 490-LED per-packet limit, and why Hyperion raw RGB is used over notifier/UDP realtime.
 
 ### Changed
-- **Version bumped to 2.1.0** for the gap feature release.
+- **Removed per-device port configuration** — The Port field in device mappings has been removed. The plugin now always targets WLED's Hyperion raw-RGB handler on UDP port 19446, which is hardcoded in WLED and cannot be changed. This eliminates misconfiguration issues where users set the wrong port (e.g. 21324) resulting in no ambilight effects.
 
 ## [2.0.0] - 2026-07-20
 
@@ -21,6 +22,20 @@ All notable changes to the Jellyfin Ambilight Plugin will be documented in this 
 ### Changed
 - **RGB-only extraction pipeline** - Removed the RGBW extraction configuration option and all RGBW extraction/runtime paths so AMb2 generation and playback consistently use RGB (3 channels).
 - **Configuration and docs cleanup** - Removed RGBW references from settings/docs and clarified `Input Position` ordering from the viewer perspective (`0` top-left, then clockwise).
+
+## [1.8.0] - 2026-03-12
+
+### Added
+- **Concurrent extractions** - New setting to allow multiple simultaneous extractions (up to 10). Removed sequential limitations in the scheduled background task.
+- **Stop/cancel extraction** - Stop button during active extractions in the plugin configuration UI. Cancel an ongoing extraction for an item, returning it to pending status.
+- **Queueing mechanics** - Excess extractions triggered manually are queued and show a `Queued` status until a concurrency slot frees up. Queued items can also be cancelled.
+- **Extract Pending batch buttons** - Extract Pending buttons on series and season headers in the Extraction Manager to quickly queue an entire series or season.
+
+### Fixed
+- **Stuck extraction states** - Videos stuck in `Extracting` or `Queued` state due to a server restart now correctly revert to `Pending` on startup.
+
+### Changed
+- **Extraction Manager layout** - Episodes are now explicitly identified with their number in a left-aligned column for better readability within a series hierarchy. Removed redundant "Movie" labels.
 
 ## [1.6.4] - 2026-03-07
 
@@ -48,6 +63,35 @@ All notable changes to the Jellyfin Ambilight Plugin will be documented in this 
 - **Serialized extraction pipeline** - Automatic extraction triggered by new library items now runs strictly one item at a time across the plugin, preventing parallel extraction jobs and reducing host CPU pressure.
 - **Extraction manager storage summary** - Added a total binary disk usage counter in the manager UI with automatic unit formatting (MB/GB/TB).
 - **Version bump and release metadata refresh** - Updated plugin version to `1.6.0` across build and documentation assets, and prepared release notes/manifest metadata for the new release.
+
+## [1.5.9] - 2026-03-03
+
+### Fixed
+- **Improved pause behavior** - When playback is paused, Ambilight now continuously re-sends the last video frame to WLED so the LEDs stay frozen on that frame instead of reverting to the controller's previous effect or color. On resume, playback timing is preserved so Ambilight continues in sync with the video.
+
+## [1.5.8] - 2026-02-27
+
+### Changed
+- **Live device mapping reload** - Device mappings created or edited in the Ambilight settings UI now take effect immediately, without requiring a Jellyfin restart. The playback service reads the latest plugin configuration on each playback event.
+
+## [1.5.7] - 2026-02-27
+
+### Fixed
+- **Device mapping matching** - Device mappings now store the human-readable device name instead of Jellyfin internal device ID. Playback matching uses session DeviceName so mappings remain stable across sessions.
+
+## [1.5.6] - 2026-02-27
+
+### Fixed
+- **Pause/resume ambilight sync** - Ambilight now pauses and resumes in sync with Jellyfin playback.
+
+### Added
+- **Scheduled task retries failed extractions** - Extract Pending Ambilight Data now includes previously failed items for retry.
+- **Improved debug logging for device mappings** - Debug logs show device ID and mappings at play start.
+
+## [1.5.5] - 2026-02-19
+
+### Fixed
+- **Hardware acceleration fix** - Reverted to v1.4.2 approach for VAAPI/QSV. Hardware acceleration for decoding only with simple scale filter chain.
 
 ## [1.0.0.0] - 2026-02-16
 

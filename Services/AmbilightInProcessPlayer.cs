@@ -29,6 +29,12 @@ namespace Jellyfin.Plugin.Ambilight.Services;
 /// </summary>
 public sealed class AmbilightInProcessPlayer : IDisposable
 {
+    /// <summary>
+    /// WLED Hyperion raw-RGB UDP port. Hardcoded in WLED's Hyperion handler
+    /// and cannot be changed via configuration. The plugin always targets this port.
+    /// </summary>
+    public const int WledUdpPort = 19446;
+
     private readonly ILogger _logger;
     private readonly PluginConfiguration _config;
 
@@ -361,7 +367,7 @@ public sealed class AmbilightInProcessPlayer : IDisposable
             if (cfg.Debug)
             {
                 _logger.LogInformation("[Ambilight] Playing {Path} → {Host}:{Port} (src {Src} LEDs → tgt {Tgt} LEDs)",
-                    binPath, mapping.Host, mapping.Port, totalSrc, totalTgt);
+                    binPath, mapping.Host, WledUdpPort, totalSrc, totalTgt);
             }
 
             if (cfg.Debug)
@@ -421,11 +427,11 @@ public sealed class AmbilightInProcessPlayer : IDisposable
             }
 
             using var udp = new UdpClient();
-            udp.Connect(targetIp, mapping.Port);
+            udp.Connect(targetIp, WledUdpPort);
 
             if (cfg.Debug)
             {
-                _logger.LogInformation("[Ambilight] Connected to WLED at {Host}:{Port}", mapping.Host, mapping.Port);
+                _logger.LogInformation("[Ambilight] Connected to WLED at {Host}:{Port}", mapping.Host, WledUdpPort);
             }
 
             double baseSyncLead = cfg.AmbilightSyncLeadSeconds;
