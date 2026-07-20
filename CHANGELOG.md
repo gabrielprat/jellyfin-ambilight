@@ -2,14 +2,19 @@
 
 All notable changes to the Jellyfin Ambilight Plugin will be documented in this file.
 
-## [2.0.0] - Unreleased
+## [2.1.0] - Unreleased
+
+### Added
+- **LED strip gap configuration** — Per-device `Gap Length` and `Gap Position` settings to handle physical LED strips with a data cable gap at any position. Gap LEDs are zeroed out in the output frame after Input Position rotation, matching HyperHDR's gap feature.
+
+### Changed
+- **Version bumped to 2.1.0** for the gap feature release.
+
+## [2.0.0] - 2026-07-20
 
 ### Changed
 - **Smoothing window default** — Changed from 0.12s to 0.06s for more responsive color transitions.
 - **Removed Brightness target, Min LED brightness, and R/G/B boost settings** — These settings caused blue color tint in dark scenes. Visual tuning now consists of gamma (global + per-channel), saturation, and smoothing only.
-
-### Added
-- **LED strip gap configuration** — Per-device `Gap Length` and `Gap Position` settings to handle physical LED strips with a data cable gap at any position. Gap LEDs are zeroed out in the output frame after Input Position rotation, matching HyperHDR's gap feature.
 
 ## [1.7.0] - 2026-03-07
 
