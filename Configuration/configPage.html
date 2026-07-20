@@ -709,14 +709,54 @@ the Free Software Foundation, either version 3 of the License, or
                         <label style="display: block; margin-bottom: 0.25em; font-size: 0.9em; opacity: 0.8;">Input Position</label>
                         <input type="number" class="mapping-input-pos emby-input" min="0" is="emby-input" />
                     </div>
-                    <div>
-                        <label style="display: block; margin-bottom: 0.25em; font-size: 0.9em; opacity: 0.8;">Gap (Bottom)</label>
-                        <input type="number" class="mapping-gap-bottom emby-input" min="0" is="emby-input" />
-                        <div style="font-size: 0.8em; opacity: 0.6; margin-top: 0.25em;">Physical LEDs at start of bottom edge that stay off (include in Bottom count)</div>
-                    </div>
                 `;
                 
                 wrapper.appendChild(ledConfig);
+
+                var gapLength = mapping.GapLength || 0;
+                var gapPosition = mapping.GapPosition || 0;
+                var gapConfigured = gapLength > 0 || gapPosition > 0;
+
+                var gapSection = document.createElement('div');
+                gapSection.style.cssText = 'margin-top: 0.75em; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 0.5em;';
+
+                var gapToggle = document.createElement('div');
+                gapToggle.style.cssText = 'cursor: pointer; display: flex; align-items: center; gap: 0.5em; user-select: none; padding: 0.25em 0;';
+                gapToggle.innerHTML = '<span style="font-size: 0.85em; opacity: 0.7;">&#9654;</span><span style="font-size: 0.9em; font-weight: 500;">Gap</span><span style="font-size: 0.8em; opacity: 0.5;">— Physical LED gap (e.g. data cable behind TV stand)</span>';
+
+                var gapBody = document.createElement('div');
+                gapBody.style.cssText = 'display: none; padding-top: 0.5em;';
+                gapBody.innerHTML = `
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75em;">
+                        <div>
+                            <label style="display: block; margin-bottom: 0.25em; font-size: 0.9em; opacity: 0.8;">Gap Length</label>
+                            <input type="number" class="mapping-gap-length emby-input" min="0" is="emby-input" />
+                            <div style="font-size: 0.8em; opacity: 0.6; margin-top: 0.25em;">Number of inactive LEDs (include in the corresponding edge's LED count)</div>
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 0.25em; font-size: 0.9em; opacity: 0.8;">Gap Position</label>
+                            <input type="number" class="mapping-gap-position emby-input" min="0" is="emby-input" />
+                            <div style="font-size: 0.8em; opacity: 0.6; margin-top: 0.25em;">LED index where gap starts, counting from 0 at top-left, clockwise (same as Input Position; e.g. Top+Right = start of bottom edge)</div>
+                        </div>
+                    </div>
+                `;
+
+                var gapArrow = gapToggle.querySelector('span');
+                gapToggle.addEventListener('click', function() {
+                    var open = gapBody.style.display !== 'none';
+                    gapBody.style.display = open ? 'none' : 'block';
+                    gapArrow.innerHTML = open ? '&#9654;' : '&#9660;';
+                });
+
+                if (gapConfigured) {
+                    gapBody.style.display = 'block';
+                    gapArrow.innerHTML = '&#9660;';
+                }
+
+                gapSection.appendChild(gapToggle);
+                gapSection.appendChild(gapBody);
+                wrapper.appendChild(gapSection);
+
                 container.appendChild(wrapper);
                 
                 // Set values after elements are added to DOM (required for Jellyfin inputs)
@@ -725,7 +765,8 @@ the Free Software Foundation, either version 3 of the License, or
                 wrapper.querySelector('.mapping-left').value = mapping.LeftLedCount || 49;
                 wrapper.querySelector('.mapping-right').value = mapping.RightLedCount || 49;
                 wrapper.querySelector('.mapping-input-pos').value = mapping.InputPosition || 0;
-                wrapper.querySelector('.mapping-gap-bottom').value = mapping.GapBottom || 0;
+                wrapper.querySelector('.mapping-gap-length').value = gapLength;
+                wrapper.querySelector('.mapping-gap-position').value = gapPosition;
             }
             
             document.getElementById('btnAddMapping').addEventListener('click', function() {
@@ -779,7 +820,8 @@ the Free Software Foundation, either version 3 of the License, or
                                 LeftLedCount: parseInt(row.querySelector('.mapping-left').value) || 49,
                                 RightLedCount: parseInt(row.querySelector('.mapping-right').value) || 49,
                                 InputPosition: parseInt(row.querySelector('.mapping-input-pos').value) || 0,
-                                GapBottom: parseInt(row.querySelector('.mapping-gap-bottom').value) || 0
+                                GapLength: parseInt(row.querySelector('.mapping-gap-length').value) || 0,
+                                GapPosition: parseInt(row.querySelector('.mapping-gap-position').value) || 0
                             });
                             seen.add(key);
                         }
