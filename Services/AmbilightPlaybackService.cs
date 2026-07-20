@@ -87,7 +87,7 @@ public class AmbilightPlaybackService
                         {
                             var mappingId = m.DeviceIdentifier ?? string.Empty;
                             var normalizedMappingId = StripDeviceIdTimestamp(mappingId);
-                            return $"\"{mappingId}\" (normalized=\"{normalizedMappingId}\") → {m.Host}:{m.Port}";
+                            return $"\"{mappingId}\" (normalized=\"{normalizedMappingId}\") → {m.Host}:{AmbilightInProcessPlayer.WledUdpPort}";
                         })
                         .ToList();
 
@@ -133,7 +133,7 @@ public class AmbilightPlaybackService
 
             if (debug)
             {
-                var wledList = string.Join(", ", targets.Select(t => $"{t.Host}:{t.Port}"));
+                var wledList = string.Join(", ", targets.Select(t => $"{t.Host}:{AmbilightInProcessPlayer.WledUdpPort}"));
                 _logger.LogInformation("[Ambilight] Device {DeviceName} → {Count} WLED target(s): {Targets}", 
                     session.DeviceName ?? session.DeviceId, targets.Count, wledList);
             }
@@ -149,7 +149,7 @@ public class AmbilightPlaybackService
                 foreach (var mapping in targets)
                 {
                     int ledCount = mapping.TopLedCount + mapping.BottomLedCount + mapping.LeftLedCount + mapping.RightLedCount;
-                    _ = AmbilightInProcessPlayer.SendFailureFlashAsync(mapping.Host, mapping.Port, ledCount, _logger);
+                    _ = AmbilightInProcessPlayer.SendFailureFlashAsync(mapping.Host, AmbilightInProcessPlayer.WledUdpPort, ledCount, _logger);
                 }
                 return;
             }
@@ -165,10 +165,10 @@ public class AmbilightPlaybackService
                 if (debug)
                 {
                     _logger.LogInformation("[Ambilight] Starting loading effect on WLED {Host}:{Port} ({Leds} LEDs)", 
-                        mapping.Host, mapping.Port, ledCount);
+                        mapping.Host, AmbilightInProcessPlayer.WledUdpPort, ledCount);
                 }
                 
-                _ = AmbilightInProcessPlayer.SendLoadingEffectAsync(mapping.Host, mapping.Port, ledCount, _logger, loadingCts.Token);
+                _ = AmbilightInProcessPlayer.SendLoadingEffectAsync(mapping.Host, AmbilightInProcessPlayer.WledUdpPort, ledCount, _logger, loadingCts.Token);
             }
             
             if (debug)
@@ -192,7 +192,7 @@ public class AmbilightPlaybackService
                 foreach (var mapping in targets)
                 {
                     int totalLeds = mapping.TopLedCount + mapping.BottomLedCount + mapping.LeftLedCount + mapping.RightLedCount;
-                    _ = AmbilightInProcessPlayer.SendFailureFlashAsync(mapping.Host, mapping.Port, totalLeds, _logger);
+                    _ = AmbilightInProcessPlayer.SendFailureFlashAsync(mapping.Host, AmbilightInProcessPlayer.WledUdpPort, totalLeds, _logger);
                 }
             }
         }
@@ -252,7 +252,7 @@ public class AmbilightPlaybackService
         private List<DeviceMapping> ResolveWledTargets(SessionInfo session)
     {
         var targets = new List<DeviceMapping>();
-        var seenTargets = new HashSet<(string host, int port)>();
+        var seenTargets = new HashSet<string>();
         
         // Get session identifiers
         var deviceId = session.DeviceId ?? string.Empty;
@@ -288,7 +288,7 @@ public class AmbilightPlaybackService
 
             if (isMatch)
             {
-                var targetKey = (mapping.Host, mapping.Port);
+                var targetKey = mapping.Host;
                 // Avoid duplicate WLED instances (but preserve the full mapping with LED config)
                 if (!seenTargets.Contains(targetKey))
                 {
@@ -362,7 +362,7 @@ public class AmbilightPlaybackService
                 {
                     int totalLeds = mapping.TopLedCount + mapping.BottomLedCount + mapping.LeftLedCount + mapping.RightLedCount;
                     _logger.LogInformation("[Ambilight] Started player for session {SessionId} → {Host}:{Port} ({Leds} LEDs: T{Top} B{Bottom} L{Left} R{Right})", 
-                        sessionId, mapping.Host, mapping.Port, totalLeds, 
+                        sessionId, mapping.Host, AmbilightInProcessPlayer.WledUdpPort, totalLeds, 
                         mapping.TopLedCount, mapping.BottomLedCount, mapping.LeftLedCount, mapping.RightLedCount);
                 }
             }
