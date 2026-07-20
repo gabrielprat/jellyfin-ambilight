@@ -126,6 +126,7 @@ Configure which Jellyfin devices should trigger ambilight effects and where to s
      - `0` = top-left LED
      - `1` = next LED to the right
      - continue clockwise around the screen
+   - **Gap (Bottom)** - Number of physical LEDs at the start of the bottom edge that should stay off (data cable gap). Include this count in your Bottom LED total. The gap is zeroed out in the output frame after the Input Position rotation is applied.
 6. **Save** - Click the Save button at the bottom
 7. **Repeat** - Add more mappings as needed
 

@@ -148,7 +148,7 @@ public class AmbilightPlaybackService
                 // Show failure flash on all WLED instances
                 foreach (var mapping in targets)
                 {
-                    int ledCount = mapping.TopLedCount + mapping.BottomLedCount + mapping.LeftLedCount + mapping.RightLedCount;
+                    int ledCount = mapping.TopLedCount + mapping.BottomLedCount + mapping.LeftLedCount + mapping.RightLedCount + mapping.GapBottom;
                     _ = AmbilightInProcessPlayer.SendFailureFlashAsync(mapping.Host, mapping.Port, ledCount, _logger);
                 }
                 return;
@@ -160,7 +160,7 @@ public class AmbilightPlaybackService
             
             foreach (var mapping in targets)
             {
-                int ledCount = mapping.TopLedCount + mapping.BottomLedCount + mapping.LeftLedCount + mapping.RightLedCount;
+                int ledCount = mapping.TopLedCount + mapping.BottomLedCount + mapping.LeftLedCount + mapping.RightLedCount + mapping.GapBottom;
                 
                 if (debug)
                 {
@@ -191,7 +191,7 @@ public class AmbilightPlaybackService
                 StopLoadingEffect(session.Id);
                 foreach (var mapping in targets)
                 {
-                    int totalLeds = mapping.TopLedCount + mapping.BottomLedCount + mapping.LeftLedCount + mapping.RightLedCount;
+                    int totalLeds = mapping.TopLedCount + mapping.BottomLedCount + mapping.LeftLedCount + mapping.RightLedCount + mapping.GapBottom;
                     _ = AmbilightInProcessPlayer.SendFailureFlashAsync(mapping.Host, mapping.Port, totalLeds, _logger);
                 }
             }
@@ -360,7 +360,7 @@ public class AmbilightPlaybackService
                 
                 if (Config.Debug)
                 {
-                    int totalLeds = mapping.TopLedCount + mapping.BottomLedCount + mapping.LeftLedCount + mapping.RightLedCount;
+                    int totalLeds = mapping.TopLedCount + mapping.BottomLedCount + mapping.LeftLedCount + mapping.RightLedCount + mapping.GapBottom;
                     _logger.LogInformation("[Ambilight] Started player for session {SessionId} → {Host}:{Port} ({Leds} LEDs: T{Top} B{Bottom} L{Left} R{Right})", 
                         sessionId, mapping.Host, mapping.Port, totalLeds, 
                         mapping.TopLedCount, mapping.BottomLedCount, mapping.LeftLedCount, mapping.RightLedCount);

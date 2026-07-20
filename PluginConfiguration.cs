@@ -98,5 +98,6 @@ namespace Jellyfin.Plugin.Ambilight
         public int LeftLedCount { get; set; } = 49;
         public int RightLedCount { get; set; } = 49;
         public int InputPosition { get; set; } = 0;
+        public int GapBottom { get; set; } = 0;
     }
 }

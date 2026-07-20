@@ -56,6 +56,15 @@ Removed settings that caused blue color tint in dark scenes with no practical be
 
 Visual tuning now consists of: gamma (global + per-channel), saturation, and smoothing — all color-neutral settings that don't introduce bias in dark content.
 
+## LED Strip Gap Configuration
+
+Per-device **Gap (Bottom)** setting for LED strips with a physical gap between the data input point and the first active LED (matching HyperHDR's gap feature):
+
+- Set **Gap (Bottom)** to the number of inactive LEDs at the start of the bottom edge
+- Include the gap count in your **Bottom LEDs** total
+- Gap positions receive black frames after Input Position rotation, keeping them off
+- Example: 40 visual bottom LEDs + 10 LED gap → set Bottom LEDs to 50, Gap to 10
+
 ## Bug Fixes
 
 - Fixed plugin icon display in Jellyfin
