@@ -455,6 +455,8 @@ public sealed class AmbilightInProcessPlayer : IDisposable
             float gammaGreen = ClampF((float)cfg.AmbilightGammaGreen, 0.1f, 5.0f);
             float gammaBlue = ClampF((float)cfg.AmbilightGammaBlue, 0.1f, 5.0f);
             int inputPosition = mapping.InputPosition;
+            int gapLength = mapping.GapLength;
+            int gapPosition = mapping.GapPosition;
 
             int rotLeds = totalTgt > 0 ? Math.Abs(inputPosition) % totalTgt : 0;
 
@@ -689,6 +691,17 @@ public sealed class AmbilightInProcessPlayer : IDisposable
                 if (rotLeds > 0)
                 {
                     frameToSend = RotateLedFrame(outFrame, rotLeds, totalTgt, bytesPerLed);
+                }
+
+                if (gapLength > 0)
+                {
+                    for (int j = 0; j < gapLength; j++)
+                    {
+                        int pos = ((gapPosition + j - rotLeds + totalTgt) % totalTgt) * bytesPerLed;
+                        frameToSend[pos] = 0;
+                        frameToSend[pos + 1] = 0;
+                        frameToSend[pos + 2] = 0;
+                    }
                 }
 
                 try
