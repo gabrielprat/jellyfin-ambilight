@@ -123,6 +123,7 @@ public class AmbilightController : ControllerBase
                 int extractionProgress = 0;
                 ulong extractionFramesCurrent = 0;
                 ulong extractionFramesTotal = 0;
+                string? binaryFormat = null;
 
                 if (entryPoint?.Storage != null)
                 {
@@ -133,7 +134,14 @@ public class AmbilightController : ControllerBase
                         extractionProgress = ambiItem.ExtractionProgress;
                         extractionFramesCurrent = ambiItem.ExtractionFramesCurrent;
                         extractionFramesTotal = ambiItem.ExtractionFramesTotal;
+                        binaryFormat = ambiItem.BinaryFormat;
                     }
+                }
+
+                // Detect format from magic bytes when metadata doesn't have it
+                if (binaryFormat == null && System.IO.File.Exists(binPath))
+                {
+                    binaryFormat = BinaryFormatDetector.DetectFormat(binPath);
                 }
 
                 results[itemId] = new AmbilightStatusResponse
@@ -146,7 +154,8 @@ public class AmbilightController : ControllerBase
                     ExtractionStatus = extractionStatus,
                     ExtractionProgress = extractionProgress,
                     ExtractionFramesCurrent = extractionFramesCurrent,
-                    ExtractionFramesTotal = extractionFramesTotal
+                    ExtractionFramesTotal = extractionFramesTotal,
+                    BinaryFormat = binaryFormat
                 };
             }
 
@@ -219,6 +228,7 @@ public class AmbilightController : ControllerBase
             int extractionProgress = 0;
             ulong extractionFramesCurrent = 0;
             ulong extractionFramesTotal = 0;
+            string? binaryFormat = null;
             
             if (entryPoint?.Storage != null)
             {
@@ -229,7 +239,8 @@ public class AmbilightController : ControllerBase
                     extractionProgress = ambiItem.ExtractionProgress;
                     extractionFramesCurrent = ambiItem.ExtractionFramesCurrent;
                     extractionFramesTotal = ambiItem.ExtractionFramesTotal;
-                    
+                    binaryFormat = ambiItem.BinaryFormat;
+
                     // Debug logging
                     if (extractionStatus == "extracting")
                     {
@@ -246,6 +257,12 @@ public class AmbilightController : ControllerBase
                 System.Diagnostics.Debug.WriteLine("[Ambilight] API Status: Storage not available");
             }
 
+            // Detect format from magic bytes when metadata doesn't have it
+            if (binaryFormat == null && System.IO.File.Exists(binPath))
+            {
+                binaryFormat = BinaryFormatDetector.DetectFormat(binPath);
+            }
+
             var status = new AmbilightStatusResponse
             {
                 ItemId = guid,
@@ -256,7 +273,8 @@ public class AmbilightController : ControllerBase
                 ExtractionStatus = extractionStatus,
                 ExtractionProgress = extractionProgress,
                 ExtractionFramesCurrent = extractionFramesCurrent,
-                ExtractionFramesTotal = extractionFramesTotal
+                ExtractionFramesTotal = extractionFramesTotal,
+                BinaryFormat = binaryFormat
             };
 
             return Ok(status);
@@ -492,6 +510,7 @@ public class AmbilightStatusResponse
     public int ExtractionProgress { get; set; }
     public ulong ExtractionFramesCurrent { get; set; }
     public ulong ExtractionFramesTotal { get; set; }
+    public string? BinaryFormat { get; set; }
 }
 
 public class AmbilightExtractResponse
@@ -505,4 +524,37 @@ public class AmbilightExtractAllResponse
 {
     public int QueuedCount { get; set; }
     public string? Message { get; set; }
+}
+
+internal static class BinaryFormatDetector
+{
+    /// <summary>
+    /// Detects binary format by reading the first 4 bytes (magic) of a .bin file.
+    /// Returns "amb2", "amb3", or null if undetectable.
+    /// </summary>
+    public static string? DetectFormat(string binPath)
+    {
+        try
+        {
+            if (!System.IO.File.Exists(binPath))
+                return null;
+
+            using var fs = System.IO.File.OpenRead(binPath);
+            var magic = new byte[4];
+            int read = fs.Read(magic, 0, 4);
+            if (read < 4)
+                return null;
+
+            if (Amb3Format.IsAm3Magic(magic))
+                return "amb3";
+            if (Amb3Format.IsAm2Magic(magic))
+                return "amb2";
+
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 }

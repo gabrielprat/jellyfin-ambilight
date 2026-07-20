@@ -313,6 +313,7 @@ the Free Software Foundation, either version 3 of the License, or
                                     <th>Title</th>
                                     <th>Added Date</th>
                                     <th>Status</th>
+                                    <th>Format</th>
                                     <th>Size</th>
                                     <th>Action</th>
                                 </tr>
@@ -1519,9 +1520,15 @@ the Free Software Foundation, either version 3 of the License, or
                     }
                 }
 
+                var formatText = '-';
+                if (status && status.HasBinary && status.BinaryFormat) {
+                    formatText = '<span style="text-transform:uppercase;font-weight:bold;font-size:0.85em;color:#9ca3af;">' + escapeHtml(status.BinaryFormat) + '</span>';
+                }
+
                 var trContent = '<td style="padding-top:1em;padding-bottom:1em;">' + titleCellHtml + '</td>' +
                     '<td>' + addedDateText + '</td>' +
                     '<td>' + statusHtml + '</td>' +
+                    '<td>' + formatText + '</td>' +
                     '<td>' + sizeText + '</td>' +
                     '<td>' + btnHtml + '</td>';
 

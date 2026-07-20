@@ -323,6 +323,7 @@ public class AmbilightExtractorService
             {
                 item.ExtractionStatus = "completed";
                 item.ExtractionError = null;
+                item.BinaryFormat = "amb3";
                 if (Config.Debug)
                 {
                     _logger.LogInformation("[Ambilight] Extraction completed for {ItemName}", item.Name);

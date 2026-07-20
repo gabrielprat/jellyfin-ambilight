@@ -55,7 +55,6 @@ This document outlines planned improvements for a next-generation AMb3 binary fo
 **Solution**:
 - Store actual PTS (Presentation TimeStamps) from video decoder instead of calculated values
 - Include video duration + total frame count in header for validation
-- Add file integrity checksum/hash
 - Flag whether video is CFR (Constant Frame Rate) or VFR in header
 - Support explicit frame durations for VFR content
 
@@ -200,7 +199,6 @@ This document outlines planned improvements for a next-generation AMb3 binary fo
 - Each chunk structure:
   - Mini-header: timestamp, type, size, frame count
   - Compressed or uncompressed data
-  - Optional checksum
 - Player can stream/buffer chunks on-demand
 - Implement chunk prefetching for smooth playback
 
@@ -209,25 +207,6 @@ This document outlines planned improvements for a next-generation AMb3 binary fo
 - Better for embedded/low-memory players
 - Enables true streaming playback
 - Parallel chunk decompression possible
-
----
-
-### 13. Error Correction / Resilience
-**Problem**: File corruption from disk errors, incomplete writes, or network transfers breaks entire playback.
-
-**Solution**:
-- Add CRC32 or xxHash checksums per chunk
-- Detect corrupted chunks during playback
-- Allow graceful degradation:
-  - Skip corrupted chunks (brief LED glitch vs. complete failure)
-  - Interpolate between good chunks if possible
-- Optional: Reed-Solomon error correction for critical sections (header, index)
-- Store redundant header at end of file
-
-**Benefits**: 
-- Robust playback despite storage errors
-- Recoverable from partial file downloads
-- Better reliability on network storage (NAS, cloud)
 
 ---
 
@@ -269,7 +248,7 @@ This document outlines planned improvements for a next-generation AMb3 binary fo
 │    ├─ Index Header                  │
 │    └─ Timestamp → Offset Entries    │
 ├─────────────────────────────────────┤
-│  Footer (checksum, redundant header)│
+│  Footer (redundant header)         │
 └─────────────────────────────────────┘
 ```
 
@@ -303,7 +282,7 @@ struct AMb3Chunk {
     uint16_t frame_count;       // Number of frames in this chunk
     uint8_t brightness_avg;     // Average brightness (0-255)
     uint8_t flags;              // Chunk-specific flags
-    uint32_t checksum;          // CRC32 or xxHash
+    uint32_t reserved;          // Reserved (zero)
     // Followed by actual frame data (compressed or not)
 };
 ```
@@ -376,11 +355,10 @@ Bits 8-31: Reserved for future use
 5. ✅ Backward compatibility (detect and read AMb2 files)
 
 ### Phase 2: Advanced Optimizations
-1. ⏳ Implement frame deduplication / RLE
-2. ⏳ Add delta encoding with keyframes
-3. ⏳ Scene change detection and markers
+1. ✅ Implement frame deduplication / RLE
+2. ✅ Add delta encoding with keyframes
+3. ✅ Scene change detection and markers
 4. ⏳ VFR support
-5. ⏳ Error correction (CRC per chunk)
 
 ### Phase 3: Quality & Features
 1. ⏳ Perceptual color encoding
