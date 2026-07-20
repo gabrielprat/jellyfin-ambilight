@@ -9,6 +9,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -22,8 +23,9 @@ namespace Jellyfin.Plugin.Ambilight.Services;
 
 /// <summary>
 /// In-process implementation of the ambilight-player logic in C#.
-/// Reads AMb2 binaries and streams frames over UDP to WLED, applying the same
+/// Reads AMb2/AMb3 binaries and streams frames over UDP to WLED, applying the same
 /// gamma/saturation/brightness/smoothing logic as the Rust player.
+/// Auto-detects format via magic bytes.
 /// </summary>
 public sealed class AmbilightInProcessPlayer : IDisposable
 {
@@ -132,28 +134,216 @@ public sealed class AmbilightInProcessPlayer : IDisposable
             using var fs = File.OpenRead(binPath);
             using var reader = new BinaryReader(fs);
 
-            // Header
+            // Format detection via magic bytes
             var magic = reader.ReadBytes(4);
-            if (magic.Length != 4 || magic[0] != (byte)'A' || magic[1] != (byte)'M' || magic[2] != (byte)'b' || magic[3] != (byte)'2')
+            if (magic.Length != 4)
             {
-                _logger.LogWarning("[Ambilight] Invalid AMb2 header in {Path}", binPath);
+                _logger.LogWarning("[Ambilight] File too short to read magic in {Path}", binPath);
                 return;
             }
 
-            var fps = reader.ReadSingle();
-            double fpsD = fps;
-            if (double.IsNaN(fpsD) || fpsD <= 0.001 || fpsD > 300.0)
-            {
-                fpsD = 0.0;
-            }
-
-            var topSrc = reader.ReadUInt16();
-            var bottomSrc = reader.ReadUInt16();
-            var leftSrc = reader.ReadUInt16();
-            var rightSrc = reader.ReadUInt16();
-            _ = reader.ReadByte(); // fmt (reserved)
+            double fpsD;
+            ushort topSrc, bottomSrc, leftSrc, rightSrc;
             const int bytesPerLed = 3;
-            var frameSize = (topSrc + bottomSrc + leftSrc + rightSrc) * bytesPerLed;
+            List<byte[]> frames;
+            List<ulong> timestampsUs;
+
+            if (Amb3Format.IsAm3Magic(magic))
+            {
+                // ── AMb3 format ──
+                // ReadHeader reads magic internally, so seek back to start
+                fs.Seek(0, SeekOrigin.Begin);
+                (var flags, _, _, var fps,
+                 topSrc, bottomSrc, leftSrc, rightSrc,
+                 _, _, _,
+                 var indexOffset, var chunkCount) = Amb3Format.ReadHeader(reader);
+
+                fpsD = fps;
+                if (double.IsNaN(fpsD) || fpsD <= 0.001 || fpsD > 300.0)
+                    fpsD = 0.0;
+
+                frames = new List<byte[]>();
+                timestampsUs = new List<ulong>();
+
+                // Read seeking index from end of file
+                (ulong timestampUs, ulong fileOffset, uint chunkIndex)[]? index = null;
+                if (indexOffset > 0 && indexOffset < (ulong)fs.Length)
+                {
+                    fs.Seek((long)indexOffset, SeekOrigin.Begin);
+                    try
+                    {
+                        index = Amb3Format.ReadIndex(reader);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "[Ambilight] Failed to read AMb3 index from {Path}", binPath);
+                    }
+                }
+
+                // Read all chunks sequentially
+                fs.Seek(Amb3Format.HeaderSize, SeekOrigin.Begin);
+                int totalLeds = topSrc + bottomSrc + leftSrc + rightSrc;
+                int frameLedBytes = totalLeds * bytesPerLed;
+                byte[]? lastKeyframe = null;
+
+                for (int ci = 0; ci < chunkCount && !cancellationToken.IsCancellationRequested; ci++)
+                {
+                    var ch = Amb3Format.ReadChunkHeader(reader);
+                    var compressedData = reader.ReadBytes((int)ch.compressedSize);
+                    if (compressedData.Length < (int)ch.compressedSize)
+                    {
+                        _logger.LogWarning("[Ambilight] Truncated AMb3 chunk {ChunkIndex} in {Path}", ci, binPath);
+                        break;
+                    }
+
+                    // Decompress
+                    byte[] uncompressed;
+                    try
+                    {
+                        using var compressedStream = new MemoryStream(compressedData);
+                        using var deflate = new DeflateStream(compressedStream, CompressionMode.Decompress);
+                        using var resultStream = new MemoryStream();
+                        deflate.CopyTo(resultStream);
+                        uncompressed = resultStream.ToArray();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "[Ambilight] Failed to decompress AMb3 chunk {ChunkIndex} in {Path}", ci, binPath);
+                        break;
+                    }
+
+                    // Parse chunk data based on type
+                    int dataOffset = 0;
+                    switch (ch.chunkType)
+                    {
+                        case Amb3Format.ChunkTypeKeyframe:
+                        {
+                            // Each entry: timestamp_us (8) + frame data (frameLedBytes) + repeat_count (4)
+                            int entrySize = 8 + frameLedBytes + 4;
+                            while (dataOffset + entrySize <= uncompressed.Length && frames.Count < ch.frameCount + frames.Count)
+                            {
+                                ulong ts = BitConverter.ToUInt64(uncompressed, dataOffset);
+                                dataOffset += 8;
+                                var frameData = new byte[frameLedBytes];
+                                Buffer.BlockCopy(uncompressed, dataOffset, frameData, 0, frameLedBytes);
+                                dataOffset += frameLedBytes;
+                                int repeat = BitConverter.ToInt32(uncompressed, dataOffset);
+                                dataOffset += 4;
+                                repeat = Math.Max(1, repeat);
+
+                                lastKeyframe = frameData;
+                                for (int r = 0; r < repeat; r++)
+                                {
+                                    timestampsUs.Add(ts);
+                                    frames.Add(frameData);
+                                }
+                            }
+                            break;
+                        }
+                        case Amb3Format.ChunkTypeDelta:
+                        {
+                            // Each entry: timestamp_us (8) + delta payload (variable)
+                            while (dataOffset < uncompressed.Length)
+                            {
+                                if (dataOffset + 8 > uncompressed.Length) break;
+                                ulong ts = BitConverter.ToUInt64(uncompressed, dataOffset);
+                                dataOffset += 8;
+
+                                // Read delta data: first 2 bytes = changed_count
+                                if (dataOffset + 2 > uncompressed.Length) break;
+                                ushort changedCount = BitConverter.ToUInt16(uncompressed, dataOffset);
+                                dataOffset += 2;
+
+                                int deltaLen = changedCount * 5; // 2 (idx) + 3 (rgb) per LED
+                                if (dataOffset + deltaLen > uncompressed.Length) break;
+
+                                if (lastKeyframe != null)
+                                {
+                                    var full = Amb3Format.DecodeDelta(
+                                        lastKeyframe,
+                                        uncompressed.AsSpan(dataOffset, deltaLen),
+                                        bytesPerLed);
+                                    timestampsUs.Add(ts);
+                                    frames.Add(full);
+                                    lastKeyframe = full;
+                                }
+                                dataOffset += deltaLen;
+                            }
+                            break;
+                        }
+                        case Amb3Format.ChunkTypeRle:
+                        {
+                            // Each entry: frame data (frameLedBytes) + repeat_count (4)
+                            int entrySize = frameLedBytes + 4;
+                            while (dataOffset + entrySize <= uncompressed.Length)
+                            {
+                                var (frame, repeat) = Amb3Format.DecodeRleFrame(
+                                    uncompressed.AsSpan(dataOffset, entrySize), frameLedBytes);
+                                dataOffset += entrySize;
+
+                                lastKeyframe = frame;
+                                for (int r = 0; r < repeat; r++)
+                                {
+                                    timestampsUs.Add(ch.timestampUs);
+                                    frames.Add(frame);
+                                }
+                            }
+                            break;
+                        }
+                        default:
+                            _logger.LogWarning("[Ambilight] Unknown AMb3 chunk type {Type} in {Path}", ch.chunkType, binPath);
+                            break;
+                    }
+                }
+
+                if (frames.Count == 0)
+                {
+                    _logger.LogWarning("[Ambilight] No frames in AMb3 file for session {SessionId}", sessionId);
+                    return;
+                }
+            }
+            else if (Amb3Format.IsAm2Magic(magic))
+            {
+                // ── AMb2 format (backward compatibility) ──
+                fpsD = reader.ReadSingle();
+                if (double.IsNaN(fpsD) || fpsD <= 0.001 || fpsD > 300.0)
+                    fpsD = 0.0;
+
+                topSrc = reader.ReadUInt16();
+                bottomSrc = reader.ReadUInt16();
+                leftSrc = reader.ReadUInt16();
+                rightSrc = reader.ReadUInt16();
+                _ = reader.ReadByte(); // fmt (reserved)
+
+                frames = new List<byte[]>();
+                timestampsUs = new List<ulong>();
+                int frameSize = (topSrc + bottomSrc + leftSrc + rightSrc) * bytesPerLed;
+
+                while (fs.Position < fs.Length && !cancellationToken.IsCancellationRequested)
+                {
+                    var tsBytes = reader.ReadBytes(8);
+                    if (tsBytes.Length < 8) break;
+                    ulong ts = BitConverter.ToUInt64(tsBytes, 0);
+
+                    var payload = reader.ReadBytes(frameSize);
+                    if (payload.Length < frameSize) break;
+
+                    timestampsUs.Add(ts);
+                    frames.Add(payload);
+                }
+
+                if (frames.Count == 0)
+                {
+                    _logger.LogWarning("[Ambilight] No frames in AMb2 file for session {SessionId}", sessionId);
+                    return;
+                }
+            }
+            else
+            {
+                _logger.LogWarning("[Ambilight] Unknown format magic in {Path}: [{M1} {M2} {M3} {M4}]",
+                    binPath, magic[0], magic[1], magic[2], magic[3]);
+                return;
+            }
 
             // Target counts from mapping (falling back to source counts when unset)
             int tgtTop = mapping.TopLedCount > 0 ? mapping.TopLedCount : Math.Max(1, (int)topSrc);
@@ -162,9 +352,9 @@ public sealed class AmbilightInProcessPlayer : IDisposable
             int tgtRight = mapping.RightLedCount > 0 ? mapping.RightLedCount : Math.Max(1, (int)rightSrc);
 
             int totalSrc = topSrc + bottomSrc + leftSrc + rightSrc;
-            if (totalSrc <= 0 && frameSize > 0)
+            if (totalSrc <= 0)
             {
-                totalSrc = frameSize / bytesPerLed;
+                totalSrc = frames.Count > 0 ? frames[0].Length / bytesPerLed : 0;
             }
             int totalTgt = tgtTop + tgtRight + tgtBottom + tgtLeft;
 
@@ -172,34 +362,6 @@ public sealed class AmbilightInProcessPlayer : IDisposable
             {
                 _logger.LogInformation("[Ambilight] Playing {Path} → {Host}:{Port} (src {Src} LEDs → tgt {Tgt} LEDs)",
                     binPath, mapping.Host, mapping.Port, totalSrc, totalTgt);
-            }
-
-            var frames = new List<byte[]>();
-            var timestampsUs = new List<ulong>();
-
-            while (fs.Position < fs.Length && !cancellationToken.IsCancellationRequested)
-            {
-                var tsBytes = reader.ReadBytes(8);
-                if (tsBytes.Length < 8)
-                {
-                    break;
-                }
-                ulong ts = BitConverter.ToUInt64(tsBytes, 0);
-
-                var payload = reader.ReadBytes(frameSize);
-                if (payload.Length < frameSize)
-                {
-                    break;
-                }
-
-                timestampsUs.Add(ts);
-                frames.Add(payload);
-            }
-
-            if (frames.Count == 0)
-            {
-                _logger.LogWarning("[Ambilight] No frames in AMb2 file for session {SessionId}", sessionId);
-                return;
             }
 
             if (cfg.Debug)
@@ -288,15 +450,10 @@ public sealed class AmbilightInProcessPlayer : IDisposable
 
             float gammaBase = (float)cfg.AmbilightGamma;
             float saturation = (float)cfg.AmbilightSaturation;
-            float brightnessTarget = (float)cfg.AmbilightBrightnessTarget;
             // Guard per-channel gamma against invalid/unstable values from persisted config.
             float gammaRed = ClampF((float)cfg.AmbilightGammaRed, 0.1f, 5.0f);
             float gammaGreen = ClampF((float)cfg.AmbilightGammaGreen, 0.1f, 5.0f);
             float gammaBlue = ClampF((float)cfg.AmbilightGammaBlue, 0.1f, 5.0f);
-            float redBoost = (float)cfg.AmbilightRedBoost;
-            float greenBoost = (float)cfg.AmbilightGreenBoost;
-            float blueBoost = (float)cfg.AmbilightBlueBoost;
-            float minLedBrightness = (float)cfg.AmbilightMinLedBrightness;
             int inputPosition = mapping.InputPosition;
 
             int rotLeds = totalTgt > 0 ? Math.Abs(inputPosition) % totalTgt : 0;
@@ -479,15 +636,6 @@ public sealed class AmbilightInProcessPlayer : IDisposable
                 var outFrame = new byte[totalTgt * bytesPerLed];
 
                 float sUser = ClampF(saturation, 0.0f, 5.0f);
-                float bTarget = Math.Max(1.0f, brightnessTarget);
-                float minB = Math.Max(0.0f, minLedBrightness);
-
-                float brightnessFactor = 1.0f;
-                if (avgLum > 1.0f)
-                {
-                    float factor = (bTarget / avgLum) * 0.7f + 0.3f;
-                    brightnessFactor = ClampF(factor, 0.05f, 2.5f);
-                }
 
                 for (int t = 0; t < totalTgt; t++)
                 {
@@ -516,36 +664,18 @@ public sealed class AmbilightInProcessPlayer : IDisposable
                     float gG = ClampF((float)MathF.Pow(gSat, invGamma), 0.0f, 1.0f);
                     float bG = ClampF((float)MathF.Pow(bSat, invGamma), 0.0f, 1.0f);
 
-                    float brightnessFactorAdj = ClampF(brightnessFactor, 0.3f, 1.8f);
-                    float rF = rG * brightnessFactorAdj * 255.0f;
-                    float gF = gG * brightnessFactorAdj * 255.0f;
-                    float bF = bG * brightnessFactorAdj * 255.0f;
+                    float rF = rG * 255.0f;
+                    float gF = gG * 255.0f;
+                    float bF = bG * 255.0f;
 
                     int @base = t * bytesPerLed;
                     acc[@base] = acc[@base] * (1.0f - k) + rF * k;
                     acc[@base + 1] = acc[@base + 1] * (1.0f - k) + gF * k;
                     acc[@base + 2] = acc[@base + 2] * (1.0f - k) + bF * k;
 
-                    // Match Rust: round smoothed accumulator before min clamp and output (avoids truncation bias / blue tint)
                     float rOut = MathF.Round(acc[@base]);
                     float gOut = MathF.Round(acc[@base + 1]);
                     float bOut = MathF.Round(acc[@base + 2]);
-
-                    float minR = minB * redBoost;
-                    float minG = minB * greenBoost;
-                    float minBB = minB * blueBoost;
-
-                    if (rOut > 0.0f && rOut < minR) rOut = minR;
-                    if (gOut > 0.0f && gOut < minG) gOut = minG;
-                    if (bOut > 0.0f && bOut < minBB) bOut = minBB;
-
-                    float lumLed = 0.2126f * rOut + 0.7152f * gOut + 0.0722f * bOut;
-                    if (lumLed < minB * 0.5f)
-                    {
-                        rOut = 0.0f;
-                        gOut = 0.0f;
-                        bOut = 0.0f;
-                    }
 
                     // Round before cast to byte to match Rust (truncation was darkening and boosting blue floor)
                     // Send RGB order - WLED handles color order remapping based on its own configuration

@@ -11,6 +11,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -282,7 +283,6 @@ public sealed class AmbilightInProcessExtractor
             ushort bottomCount = (ushort)Math.Max(0, cfg.AmbilightBottomLedCount);
             ushort leftCount = (ushort)Math.Max(0, cfg.AmbilightLeftLedCount);
             ushort rightCount = (ushort)Math.Max(0, cfg.AmbilightRightLedCount);
-            byte fmt = 0; // RGB only
             int bytesPerLed = 3;
             var zones = ComputeLedZones(ExtractWidth, ExtractHeight, topCount, bottomCount, leftCount, rightCount);
             int ledsPerFrame = zones.Count;
@@ -334,22 +334,143 @@ public sealed class AmbilightInProcessExtractor
             int frameSize = ExtractWidth * ExtractHeight * 3; // rgb24
             var frameBuffer = new byte[frameSize];
 
-            // Accumulate AMb2 data in memory as the Rust extractor does.
             using var ms = new MemoryStream();
             using var writer = new BinaryWriter(ms);
 
-            // Write AMb2 header (magic + fps + counts + fmt)
-            writer.Write(new[] { (byte)'A', (byte)'M', (byte)'b', (byte)'2' });
-            writer.Write(fps);
-            writer.Write(topCount);
-            writer.Write(bottomCount);
-            writer.Write(leftCount);
-            writer.Write(rightCount);
-            writer.Write(fmt);
+            // Write AMb3 header with placeholder index_offset (backpatched later)
+            uint headerFlags = Amb3Format.FlagCompression;
+            Amb3Format.WriteHeader(
+                writer,
+                flags: headerFlags,
+                durationUs: (ulong)(duration * 1_000_000.0),
+                totalFrames: estimatedFrames,
+                fps: fps,
+                topLeds: topCount,
+                bottomLeds: bottomCount,
+                leftLeds: leftCount,
+                rightLeds: rightCount,
+                colorFormat: Amb3Format.ColorFormatRgb,
+                compression: Amb3Format.CompressionDeflate,
+                qualityLevel: Amb3Format.QualityHigh,
+                indexOffset: 0, // backpatched after index is written
+                chunkCount: 0); // backpatched after all chunks written
 
             ulong frameIndex = 0;
             var zoning = zones.ToArray();
             var zoneColors = new byte[ledsPerFrame * bytesPerLed];
+            int ledsBytes = ledsPerFrame * bytesPerLed;
+            int chapterSize = cfg.Amb3ChapterSizeFrames > 0 ? cfg.Amb3ChapterSizeFrames : Amb3Format.DefaultChapterFrames;
+            int deltaThreshold = cfg.Amb3DeltaThreshold > 0 ? cfg.Amb3DeltaThreshold : 10;
+            bool deltaFallback = cfg.Amb3DeltaFallbackToKeyframe;
+            int sceneChangeThreshold = cfg.Amb3SceneChangeThreshold; // % of LEDs that must change to trigger scene cut
+
+            // Chapter buffer: list of LED frame byte arrays
+            var chapterFrames = new List<byte[]>();
+            var chapterTimestamps = new List<ulong>();
+            var chunkOffsets = new List<(ulong timestampUs, ulong fileOffset, uint chunkIndex)>();
+            uint chunkIndex = 0;
+            byte[]? lastKeyframeData = null;
+            byte[]? lastFrameColors = null; // for scene change detection
+
+            // Helpers for compressing chapter data
+            byte[] CompressData(byte[] raw)
+            {
+                using var compressed = new MemoryStream();
+                using (var deflate = new DeflateStream(compressed, CompressionLevel.Fastest, leaveOpen: true))
+                {
+                    deflate.Write(raw, 0, raw.Length);
+                }
+                return compressed.ToArray();
+            }
+
+            void FlushChapter()
+            {
+                if (chapterFrames.Count == 0) return;
+
+                // Decide chapter type: keyframe or delta
+                bool useDelta = lastKeyframeData != null && chapterFrames.Count > 0;
+                if (useDelta && deltaFallback)
+                {
+                    // Check how many LEDs changed across all frames vs keyframe
+                    int totalChanged = 0;
+                    foreach (var frame in chapterFrames)
+                    {
+                        totalChanged += Amb3Format.CountChangedLeds(lastKeyframeData, frame, bytesPerLed, deltaThreshold);
+                    }
+                    int avgChanged = totalChanged / chapterFrames.Count;
+                    // If >50% of LEDs changed on average, fall back to keyframe
+                    if (avgChanged > ledsPerFrame / 2)
+                        useDelta = false;
+                }
+
+                // Serialize chapter frame data
+                byte[] chapterData;
+                byte chunkType;
+                byte brightnessAvg = Amb3Format.ComputeAverageBrightness(chapterFrames[0]);
+
+                if (useDelta)
+                {
+                    chunkType = Amb3Format.ChunkTypeDelta;
+                    using var chMs = new MemoryStream();
+                    using var chW = new BinaryWriter(chMs);
+                    foreach (var frame in chapterFrames)
+                    {
+                        chW.Write(chapterTimestamps[chapterFrames.IndexOf(frame)]);
+                        var delta = Amb3Format.EncodeDelta(lastKeyframeData!, frame, bytesPerLed, deltaThreshold);
+                        chW.Write(delta);
+                    }
+                    chapterData = chMs.ToArray();
+                }
+                else
+                {
+                    chunkType = Amb3Format.ChunkTypeKeyframe;
+                    // Apply RLE dedup: group consecutive identical frames
+                    using var chMs = new MemoryStream();
+                    using var chW = new BinaryWriter(chMs);
+                    int i = 0;
+                    while (i < chapterFrames.Count)
+                    {
+                        int runLength = 1;
+                        while (i + runLength < chapterFrames.Count &&
+                               Amb3Format.FramesEqual(chapterFrames[i], chapterFrames[i + runLength]))
+                        {
+                            runLength++;
+                        }
+
+                        chW.Write(chapterTimestamps[i]);
+                        chW.Write(chapterFrames[i]);
+                        chW.Write(runLength); // RLE repeat count (always written for uniformity)
+
+                        i += runLength;
+                    }
+                    chapterData = chMs.ToArray();
+                    lastKeyframeData = chapterFrames[^1]; // last frame becomes reference for next delta
+                }
+
+                // Compress chapter data
+                byte[] compressedData = CompressData(chapterData);
+
+                // Write chunk
+                ulong chunkTimestamp = chapterTimestamps[0];
+                chunkOffsets.Add((chunkTimestamp, (ulong)ms.Position, chunkIndex));
+
+                Amb3Format.WriteChunkHeader(
+                    writer,
+                    timestampUs: chunkTimestamp,
+                    chunkType: chunkType,
+                    compressedSize: (uint)compressedData.Length,
+                    uncompressedSize: (uint)chapterData.Length,
+                    frameCount: (ushort)chapterFrames.Count,
+                    brightnessAvg: brightnessAvg,
+                    flags: 0,
+                    checksum: 0);
+
+                writer.Write(compressedData);
+                chunkIndex++;
+
+                chapterFrames.Clear();
+                chapterTimestamps.Clear();
+            }
 
             while (!cancellationToken.IsCancellationRequested)
             {
@@ -370,27 +491,53 @@ public sealed class AmbilightInProcessExtractor
                     break; // no more frames
                 }
 
-                // Calculate timestamp in microseconds using actual video FPS (matching Rust implementation)
                 ulong tsUs = (ulong)(frameIndex * 1_000_000.0 / fps);
-                writer.Write(tsUs);
 
                 // Compute colors for each zone
                 ComputeFrameColors(frameBuffer, ExtractWidth, ExtractHeight, zoning, zoneColors);
-                writer.Write(zoneColors);
+
+                // Copy zone colors ( BinaryWriter writes from the array reference,
+                // and we reuse zoneColors, so we need our own copy per frame)
+                var frameCopy = new byte[ledsBytes];
+                Buffer.BlockCopy(zoneColors, 0, frameCopy, 0, ledsBytes);
+
+                // Scene change detection: if >threshold% of LEDs changed vs previous frame, flush chapter
+                if (sceneChangeThreshold > 0 && lastFrameColors != null && chapterFrames.Count > 0)
+                {
+                    int changedLeds = Amb3Format.CountChangedLeds(lastFrameColors, frameCopy, bytesPerLed, deltaThreshold);
+                    int sceneChangePercent = (changedLeds * 100) / ledsPerFrame;
+                    if (sceneChangePercent >= sceneChangeThreshold)
+                    {
+                        FlushChapter();
+                        lastKeyframeData = null; // force next chapter to be a keyframe
+                    }
+                }
+
+                chapterFrames.Add(frameCopy);
+                chapterTimestamps.Add(tsUs);
+                lastFrameColors = frameCopy;
+
+                // Flush chapter when buffer is full
+                if (chapterFrames.Count >= chapterSize)
+                {
+                    FlushChapter();
+                }
 
                 frameIndex++;
-                
-                // Report progress every 200 frames to avoid overhead
+
                 if (progress != null && frameIndex % 200 == 0)
                 {
                     progress.Report((frameIndex, estimatedFrames));
                 }
-                
+
                 if (cfg.Debug && frameIndex % 200 == 0)
                 {
                     _logger.LogInformation("[Ambilight] Extractor: processed {Frames} frames for {Path}", frameIndex, videoPath);
                 }
             }
+
+            // Flush remaining frames in the last chapter
+            FlushChapter();
 
             try
             {
@@ -403,7 +550,6 @@ public sealed class AmbilightInProcessExtractor
 
             if (frameIndex == 0)
             {
-                // Try to get stderr output for better error reporting
                 string stderrOutput = "";
                 if (stderrTask != null)
                 {
@@ -416,7 +562,7 @@ public sealed class AmbilightInProcessExtractor
                         // Ignore errors reading stderr
                     }
                 }
-                
+
                 if (!string.IsNullOrWhiteSpace(stderrOutput))
                 {
                     _logger.LogWarning("[Ambilight] Extractor: no frames decoded for {Path}. ffmpeg stderr: {Error}", videoPath, stderrOutput);
@@ -428,6 +574,19 @@ public sealed class AmbilightInProcessExtractor
                 return false;
             }
 
+            // Write seeking index at end of file
+            ulong indexOffset = (ulong)ms.Position;
+            Amb3Format.WriteIndex(writer, chunkOffsets.ToArray());
+
+            // Backpatch header: index_offset and chunk_count
+            Amb3Format.BackpatchHeaderIndexOffset(ms, indexOffset);
+            // chunk_count is at offset 49: magic(4) + version(1) + flags(4) + duration(8) + frames(8) + fps(4) + leds(8) + color_fmt(1) + compression(1) + quality(1) + colorspace(1) + index_offset(8) = 49
+            long chunkCountPos = 49;
+            var savedPos = ms.Position;
+            ms.Seek(chunkCountPos, SeekOrigin.Begin);
+            writer.Write(chunkIndex);
+            ms.Seek(savedPos, SeekOrigin.Begin);
+
             // Atomic write to target path
             var outDir = Path.GetDirectoryName(outputPath);
             if (!string.IsNullOrEmpty(outDir))
@@ -438,8 +597,7 @@ public sealed class AmbilightInProcessExtractor
             var tempPath = outputPath + ".tmp";
             await File.WriteAllBytesAsync(tempPath, ms.ToArray(), cancellationToken).ConfigureAwait(false);
             File.Move(tempPath, outputPath, overwrite: true);
-            
-            // Report 100% completion
+
             progress?.Report((frameIndex, estimatedFrames));
 
             long fileSize = 0;
@@ -458,7 +616,7 @@ public sealed class AmbilightInProcessExtractor
 
             if (cfg.Debug)
             {
-                _logger.LogInformation("[Ambilight] Extractor: wrote AMb2 file {Output} with {Frames} frames", outputPath, frameIndex);
+                _logger.LogInformation("[Ambilight] Extractor: wrote AMb3 file {Output} with {Frames} frames in {Chunks} chunks", outputPath, frameIndex, chunkIndex);
             }
             if (cfg.Debug)
             {
@@ -544,6 +702,12 @@ public sealed class AmbilightInProcessExtractor
     {
         const int bytesPerLed = 3;
 
+        // First pass: extract colors and luminances
+        var zoneColors = new (byte r, byte g, byte b)[zones.Length];
+        var zoneLuminances = new float[zones.Length];
+        double totalLuminance = 0.0;
+        int validZones = 0;
+
         for (int i = 0; i < zones.Length; i++)
         {
             var (x1, y1, x2, y2) = zones[i];
@@ -553,21 +717,39 @@ public sealed class AmbilightInProcessExtractor
             y2 = Math.Clamp(y2, 0, height);
             if (x2 <= x1 || y2 <= y1)
             {
-                // No area – black
-                int baseIdx = i * bytesPerLed;
-                output[baseIdx] = 0;
-                output[baseIdx + 1] = 0;
-                output[baseIdx + 2] = 0;
+                zoneColors[i] = (0, 0, 0);
+                zoneLuminances[i] = 0f;
                 continue;
             }
 
-            // Extract edge-dominant color (matching Rust implementation)
-            var (rOut, gOut, bOut) = ExtractEdgeDominantColor(frame, width, height, x1, y1, x2, y2);
+            var (rOut, gOut, bOut, lum) = ExtractEdgeDominantColor(frame, width, height, x1, y1, x2, y2);
+            zoneColors[i] = (rOut, gOut, bOut);
+            zoneLuminances[i] = lum;
+            totalLuminance += lum;
+            validZones++;
+        }
 
+        // Compute global average luminance
+        float globalAvgLum = validZones > 0 ? (float)(totalLuminance / validZones) : 0f;
+
+        // Second pass: scale RGB by zone luminance relative to global average
+        for (int i = 0; i < zones.Length; i++)
+        {
             int outBase = i * bytesPerLed;
-            output[outBase] = rOut;
-            output[outBase + 1] = gOut;
-            output[outBase + 2] = bOut;
+
+            if (globalAvgLum <= 0.01f || zoneLuminances[i] <= 0.01f)
+            {
+                // Dark frame or dark zone — keep original color (will be dim anyway)
+                output[outBase] = zoneColors[i].r;
+                output[outBase + 1] = zoneColors[i].g;
+                output[outBase + 2] = zoneColors[i].b;
+                continue;
+            }
+
+            float scale = zoneLuminances[i] / globalAvgLum;
+            output[outBase] = (byte)Math.Clamp((int)Math.Round(zoneColors[i].r * scale), 0, 255);
+            output[outBase + 1] = (byte)Math.Clamp((int)Math.Round(zoneColors[i].g * scale), 0, 255);
+            output[outBase + 2] = (byte)Math.Clamp((int)Math.Round(zoneColors[i].b * scale), 0, 255);
         }
     }
 
@@ -575,7 +757,7 @@ public sealed class AmbilightInProcessExtractor
     /// Extract color from a zone using edge detection + center weighting, matching the Rust extractor.
     /// Uses Sobel edge detection (simpler than Canny but similar results) combined with Gaussian center weighting.
     /// </summary>
-    private static (byte r, byte g, byte b) ExtractEdgeDominantColor(
+    private static (byte r, byte g, byte b, float luminance) ExtractEdgeDominantColor(
         byte[] frame,
         int frameWidth,
         int frameHeight,
@@ -589,12 +771,14 @@ public sealed class AmbilightInProcessExtractor
 
         if (w <= 0 || h <= 0)
         {
-            return (0, 0, 0);
+            return (0, 0, 0, 0f);
         }
 
         // Compute grayscale and Sobel edge strength for the ROI
         var edgeStrength = new float[h, w];
         float maxEdge = 0.0f;
+        double lumSum = 0.0;
+        int pixelCount = 0;
 
         for (int yy = 0; yy < h; yy++)
         {
@@ -632,8 +816,15 @@ public sealed class AmbilightInProcessExtractor
                 float magnitude = MathF.Sqrt(gx * gx + gy * gy);
                 edgeStrength[yy, xx] = magnitude;
                 maxEdge = Math.Max(maxEdge, magnitude);
+
+                // Accumulate luminance for zone brightness
+                int centerIdx = (fy * frameWidth + fx) * 3;
+                lumSum += frame[centerIdx] * 0.2126 + frame[centerIdx + 1] * 0.7152 + frame[centerIdx + 2] * 0.0722;
+                pixelCount++;
             }
         }
+
+        float zoneLuminance = pixelCount > 0 ? (float)(lumSum / pixelCount) : 0f;
 
         // Normalize edge strengths to 0-1 range
         if (maxEdge > 0.0f)
@@ -693,7 +884,8 @@ public sealed class AmbilightInProcessExtractor
             return (
                 (byte)Math.Clamp((int)Math.Round(rSum / totalWeight), 0, 255),
                 (byte)Math.Clamp((int)Math.Round(gSum / totalWeight), 0, 255),
-                (byte)Math.Clamp((int)Math.Round(bSum / totalWeight), 0, 255)
+                (byte)Math.Clamp((int)Math.Round(bSum / totalWeight), 0, 255),
+                zoneLuminance
             );
         }
 
@@ -717,11 +909,12 @@ public sealed class AmbilightInProcessExtractor
             return (
                 (byte)(rAvg / count),
                 (byte)(gAvg / count),
-                (byte)(bAvg / count)
+                (byte)(bAvg / count),
+                zoneLuminance
             );
         }
 
-        return (0, 0, 0);
+        return (0, 0, 0, 0f);
     }
 }
 

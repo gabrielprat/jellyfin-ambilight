@@ -273,6 +273,10 @@ public class AmbilightItem
     public int? ExtractionRightLedCount { get; set; }
     public int? ExtractionBottomLedCount { get; set; }
     public int? ExtractionLeftLedCount { get; set; }
+    /// <summary>
+    /// Binary format version: "amb2" or "amb3". Null for pre-existing files.
+    /// </summary>
+    public string? BinaryFormat { get; set; }
 }
 
 public class StorageStatistics
