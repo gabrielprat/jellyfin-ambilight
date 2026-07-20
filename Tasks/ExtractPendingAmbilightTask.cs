@@ -25,17 +25,20 @@ namespace Jellyfin.Plugin.Ambilight.Tasks;
 public class ExtractPendingAmbilightTask : IScheduledTask
 {
     private readonly ILogger<ExtractPendingAmbilightTask> _logger;
+    private readonly ILoggerFactory _loggerFactory;
     private readonly ILibraryManager _libraryManager;
     private readonly PluginConfiguration _config;
-    
+
     private AmbilightStorageService? _storage;
     private AmbilightExtractorService? _extractor;
 
     public ExtractPendingAmbilightTask(
         ILogger<ExtractPendingAmbilightTask> logger,
+        ILoggerFactory loggerFactory,
         ILibraryManager libraryManager)
     {
         _logger = logger;
+        _loggerFactory = loggerFactory;
         _libraryManager = libraryManager;
         _config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
     }
@@ -57,10 +60,11 @@ public class ExtractPendingAmbilightTask : IScheduledTask
         // Initialize services if needed
         if (_storage == null || _extractor == null)
         {
-            var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
-            var storageLogger = loggerFactory.CreateLogger<AmbilightStorageService>();
-            var extractorLogger = loggerFactory.CreateLogger<AmbilightExtractorService>();
-            var extractorCoreLogger = loggerFactory.CreateLogger<AmbilightInProcessExtractor>();
+            // Use Jellyfin's injected logger factory (see AmbilightEntryPoint) so extraction
+            // logs reach the server log rather than a private stdout-only pipeline.
+            var storageLogger = _loggerFactory.CreateLogger<AmbilightStorageService>();
+            var extractorLogger = _loggerFactory.CreateLogger<AmbilightExtractorService>();
+            var extractorCoreLogger = _loggerFactory.CreateLogger<AmbilightInProcessExtractor>();
 
             _storage = new AmbilightStorageService(storageLogger, Config);
             var extractorCore = new AmbilightInProcessExtractor(extractorCoreLogger, Config);
