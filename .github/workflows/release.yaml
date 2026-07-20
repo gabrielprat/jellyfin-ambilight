@@ -25,7 +25,7 @@ jobs:
       run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
     
     - name: Restore dependencies
-      run: dotnet restore
+      run: dotnet clean --configuration Release 2>&1 && dotnet restore
     
     - name: Build
       run: dotnet build --no-restore --configuration Release

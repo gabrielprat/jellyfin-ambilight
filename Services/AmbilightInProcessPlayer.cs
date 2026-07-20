@@ -151,6 +151,8 @@ public sealed class AmbilightInProcessPlayer : IDisposable
             if (Amb3Format.IsAm3Magic(magic))
             {
                 // ── AMb3 format ──
+                // ReadHeader reads magic internally, so seek back to start
+                fs.Seek(0, SeekOrigin.Begin);
                 (var flags, _, _, var fps,
                  topSrc, bottomSrc, leftSrc, rightSrc,
                  _, _, _,
@@ -266,6 +268,25 @@ public sealed class AmbilightInProcessPlayer : IDisposable
                                     lastKeyframe = full;
                                 }
                                 dataOffset += deltaLen;
+                            }
+                            break;
+                        }
+                        case Amb3Format.ChunkTypeRle:
+                        {
+                            // Each entry: frame data (frameLedBytes) + repeat_count (4)
+                            int entrySize = frameLedBytes + 4;
+                            while (dataOffset + entrySize <= uncompressed.Length)
+                            {
+                                var (frame, repeat) = Amb3Format.DecodeRleFrame(
+                                    uncompressed.AsSpan(dataOffset, entrySize), frameLedBytes);
+                                dataOffset += entrySize;
+
+                                lastKeyframe = frame;
+                                for (int r = 0; r < repeat; r++)
+                                {
+                                    timestampsUs.Add(ch.timestampUs);
+                                    frames.Add(frame);
+                                }
                             }
                             break;
                         }

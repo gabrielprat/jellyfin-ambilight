@@ -362,6 +362,7 @@ public sealed class AmbilightInProcessExtractor
             int chapterSize = cfg.Amb3ChapterSizeFrames > 0 ? cfg.Amb3ChapterSizeFrames : Amb3Format.DefaultChapterFrames;
             int deltaThreshold = cfg.Amb3DeltaThreshold > 0 ? cfg.Amb3DeltaThreshold : 10;
             bool deltaFallback = cfg.Amb3DeltaFallbackToKeyframe;
+            int sceneChangeThreshold = cfg.Amb3SceneChangeThreshold; // % of LEDs that must change to trigger scene cut
 
             // Chapter buffer: list of LED frame byte arrays
             var chapterFrames = new List<byte[]>();
@@ -369,6 +370,7 @@ public sealed class AmbilightInProcessExtractor
             var chunkOffsets = new List<(ulong timestampUs, ulong fileOffset, uint chunkIndex)>();
             uint chunkIndex = 0;
             byte[]? lastKeyframeData = null;
+            byte[]? lastFrameColors = null; // for scene change detection
 
             // Helpers for compressing chapter data
             byte[] CompressData(byte[] raw)
@@ -461,7 +463,7 @@ public sealed class AmbilightInProcessExtractor
                     frameCount: (ushort)chapterFrames.Count,
                     brightnessAvg: brightnessAvg,
                     flags: 0,
-                    checksum: 0); // TODO: CRC32 in future phase
+                    checksum: 0);
 
                 writer.Write(compressedData);
                 chunkIndex++;
@@ -498,8 +500,22 @@ public sealed class AmbilightInProcessExtractor
                 // and we reuse zoneColors, so we need our own copy per frame)
                 var frameCopy = new byte[ledsBytes];
                 Buffer.BlockCopy(zoneColors, 0, frameCopy, 0, ledsBytes);
+
+                // Scene change detection: if >threshold% of LEDs changed vs previous frame, flush chapter
+                if (sceneChangeThreshold > 0 && lastFrameColors != null && chapterFrames.Count > 0)
+                {
+                    int changedLeds = Amb3Format.CountChangedLeds(lastFrameColors, frameCopy, bytesPerLed, deltaThreshold);
+                    int sceneChangePercent = (changedLeds * 100) / ledsPerFrame;
+                    if (sceneChangePercent >= sceneChangeThreshold)
+                    {
+                        FlushChapter();
+                        lastKeyframeData = null; // force next chapter to be a keyframe
+                    }
+                }
+
                 chapterFrames.Add(frameCopy);
                 chapterTimestamps.Add(tsUs);
+                lastFrameColors = frameCopy;
 
                 // Flush chapter when buffer is full
                 if (chapterFrames.Count >= chapterSize)
@@ -564,10 +580,8 @@ public sealed class AmbilightInProcessExtractor
 
             // Backpatch header: index_offset and chunk_count
             Amb3Format.BackpatchHeaderIndexOffset(ms, indexOffset);
-            // chunk_count is at offset 89 in header (96 - 4 reserved - 4 chunk_count = 88... let me compute)
-            // magic(4) + version(1) + flags(4) + duration(8) + frames(8) + fps(4) + leds(8) + color_fmt(1) + compression(1) + quality(1) + colorspace(1) + index_offset(8) + chunk_count(4) = 53
-            // chunk_count starts at offset 53
-            long chunkCountPos = 53;
+            // chunk_count is at offset 49: magic(4) + version(1) + flags(4) + duration(8) + frames(8) + fps(4) + leds(8) + color_fmt(1) + compression(1) + quality(1) + colorspace(1) + index_offset(8) = 49
+            long chunkCountPos = 49;
             var savedPos = ms.Position;
             ms.Seek(chunkCountPos, SeekOrigin.Begin);
             writer.Write(chunkIndex);
@@ -688,6 +702,12 @@ public sealed class AmbilightInProcessExtractor
     {
         const int bytesPerLed = 3;
 
+        // First pass: extract colors and luminances
+        var zoneColors = new (byte r, byte g, byte b)[zones.Length];
+        var zoneLuminances = new float[zones.Length];
+        double totalLuminance = 0.0;
+        int validZones = 0;
+
         for (int i = 0; i < zones.Length; i++)
         {
             var (x1, y1, x2, y2) = zones[i];
@@ -697,21 +717,39 @@ public sealed class AmbilightInProcessExtractor
             y2 = Math.Clamp(y2, 0, height);
             if (x2 <= x1 || y2 <= y1)
             {
-                // No area – black
-                int baseIdx = i * bytesPerLed;
-                output[baseIdx] = 0;
-                output[baseIdx + 1] = 0;
-                output[baseIdx + 2] = 0;
+                zoneColors[i] = (0, 0, 0);
+                zoneLuminances[i] = 0f;
                 continue;
             }
 
-            // Extract edge-dominant color (matching Rust implementation)
-            var (rOut, gOut, bOut) = ExtractEdgeDominantColor(frame, width, height, x1, y1, x2, y2);
+            var (rOut, gOut, bOut, lum) = ExtractEdgeDominantColor(frame, width, height, x1, y1, x2, y2);
+            zoneColors[i] = (rOut, gOut, bOut);
+            zoneLuminances[i] = lum;
+            totalLuminance += lum;
+            validZones++;
+        }
 
+        // Compute global average luminance
+        float globalAvgLum = validZones > 0 ? (float)(totalLuminance / validZones) : 0f;
+
+        // Second pass: scale RGB by zone luminance relative to global average
+        for (int i = 0; i < zones.Length; i++)
+        {
             int outBase = i * bytesPerLed;
-            output[outBase] = rOut;
-            output[outBase + 1] = gOut;
-            output[outBase + 2] = bOut;
+
+            if (globalAvgLum <= 0.01f || zoneLuminances[i] <= 0.01f)
+            {
+                // Dark frame or dark zone — keep original color (will be dim anyway)
+                output[outBase] = zoneColors[i].r;
+                output[outBase + 1] = zoneColors[i].g;
+                output[outBase + 2] = zoneColors[i].b;
+                continue;
+            }
+
+            float scale = zoneLuminances[i] / globalAvgLum;
+            output[outBase] = (byte)Math.Clamp((int)Math.Round(zoneColors[i].r * scale), 0, 255);
+            output[outBase + 1] = (byte)Math.Clamp((int)Math.Round(zoneColors[i].g * scale), 0, 255);
+            output[outBase + 2] = (byte)Math.Clamp((int)Math.Round(zoneColors[i].b * scale), 0, 255);
         }
     }
 
@@ -719,7 +757,7 @@ public sealed class AmbilightInProcessExtractor
     /// Extract color from a zone using edge detection + center weighting, matching the Rust extractor.
     /// Uses Sobel edge detection (simpler than Canny but similar results) combined with Gaussian center weighting.
     /// </summary>
-    private static (byte r, byte g, byte b) ExtractEdgeDominantColor(
+    private static (byte r, byte g, byte b, float luminance) ExtractEdgeDominantColor(
         byte[] frame,
         int frameWidth,
         int frameHeight,
@@ -733,12 +771,14 @@ public sealed class AmbilightInProcessExtractor
 
         if (w <= 0 || h <= 0)
         {
-            return (0, 0, 0);
+            return (0, 0, 0, 0f);
         }
 
         // Compute grayscale and Sobel edge strength for the ROI
         var edgeStrength = new float[h, w];
         float maxEdge = 0.0f;
+        double lumSum = 0.0;
+        int pixelCount = 0;
 
         for (int yy = 0; yy < h; yy++)
         {
@@ -776,8 +816,15 @@ public sealed class AmbilightInProcessExtractor
                 float magnitude = MathF.Sqrt(gx * gx + gy * gy);
                 edgeStrength[yy, xx] = magnitude;
                 maxEdge = Math.Max(maxEdge, magnitude);
+
+                // Accumulate luminance for zone brightness
+                int centerIdx = (fy * frameWidth + fx) * 3;
+                lumSum += frame[centerIdx] * 0.2126 + frame[centerIdx + 1] * 0.7152 + frame[centerIdx + 2] * 0.0722;
+                pixelCount++;
             }
         }
+
+        float zoneLuminance = pixelCount > 0 ? (float)(lumSum / pixelCount) : 0f;
 
         // Normalize edge strengths to 0-1 range
         if (maxEdge > 0.0f)
@@ -837,7 +884,8 @@ public sealed class AmbilightInProcessExtractor
             return (
                 (byte)Math.Clamp((int)Math.Round(rSum / totalWeight), 0, 255),
                 (byte)Math.Clamp((int)Math.Round(gSum / totalWeight), 0, 255),
-                (byte)Math.Clamp((int)Math.Round(bSum / totalWeight), 0, 255)
+                (byte)Math.Clamp((int)Math.Round(bSum / totalWeight), 0, 255),
+                zoneLuminance
             );
         }
 
@@ -861,11 +909,12 @@ public sealed class AmbilightInProcessExtractor
             return (
                 (byte)(rAvg / count),
                 (byte)(gAvg / count),
-                (byte)(bAvg / count)
+                (byte)(bAvg / count),
+                zoneLuminance
             );
         }
 
-        return (0, 0, 0);
+        return (0, 0, 0, 0f);
     }
 }
 

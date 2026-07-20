@@ -18,7 +18,7 @@ namespace Jellyfin.Plugin.Ambilight.Services;
 /// </summary>
 public static class Amb3Format
 {
-    public const int HeaderSize = 96;
+    public const int HeaderSize = 85;
     public const int ChunkHeaderSize = 32;
     public const int IndexHeaderSize = 8;
     public const int IndexEntrySize = 20;
@@ -125,8 +125,7 @@ public static class Amb3Format
 
     public static void BackpatchHeaderIndexOffset(Stream stream, ulong indexOffset)
     {
-        // index_offset is at offset 56 in the header (4+1+4+8+8+4+8+1+1+1+1 = 41, then 8 bytes for index_offset)
-        // Let me compute: magic(4) + version(1) + flags(4) + duration(8) + frames(8) + fps(4) + leds(8) + color_fmt(1) + compression(1) + quality(1) + colorspace(1) = 41
+        // index_offset is at byte 41: magic(4) + version(1) + flags(4) + duration(8) + frames(8) + fps(4) + leds(8) + color_fmt(1) + compression(1) + quality(1) + colorspace(1) = 41
         const long offset = 41;
         var pos = stream.Position;
         stream.Seek(offset, SeekOrigin.Begin);

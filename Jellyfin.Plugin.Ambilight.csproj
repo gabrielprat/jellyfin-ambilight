@@ -40,7 +40,10 @@
 
   <ItemGroup>
     <!-- Copy plugin icon to output directory so Jellyfin can display it -->
-    <None Include="docs\thumb.png">
+    <None Include="docs\thumb.png" Link="thumb.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="meta.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>

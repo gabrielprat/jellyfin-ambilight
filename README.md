@@ -275,12 +275,7 @@ Starting with v2.0.0, new extractions use the **AMb3** binary format. The plugin
 
 **AMb3 header (96 bytes):** magic `AMb3`, version, flags (compression, delta, VFR, HDR), duration, total frames, base FPS, LED counts, compression algorithm, quality level, index offset, chunk count.
 
-**Chunk header (32 bytes):** timestamp, chunk type (keyframe/delta/RLE), compressed/uncompressed sizes, frame count, average brightness, checksum.
-
-**Configurable extraction settings** (AMB3 Format Settings in the config page):
-- **Chapter size** — frames per compression chunk (default 48, ~2s at 24fps)
-- **Delta threshold** — per-LED RGB difference to trigger delta storage (default 10)
-- **Delta fallback** — write keyframe instead of delta when >50% of LEDs changed
+**Chunk header (32 bytes):** timestamp, chunk type (keyframe/delta/RLE), compressed/uncompressed sizes, frame count, average brightness, flags.
 
 ## Support & Development
 

@@ -5,8 +5,7 @@ C# / .NET 8 plugin for Jellyfin that drives WLED LED strips with edge-detected v
 ## Build
 
 ```bash
-dotnet restore
-dotnet build --no-restore --configuration Release
+dotnet clean --configuration Release 2>&1 && dotnet restore && dotnet build --no-restore --configuration Release
 ```
 
 No test suite, no linter, no formatter, no typecheck beyond what the compiler provides. CI runs exactly the two commands above.
@@ -38,7 +37,7 @@ Magic `"AMb2"` + float fps + 4×ushort LED counts + 1 byte format. Per-frame: ul
 
 ## AMb3 binary format
 
-Magic `"AMb3"` + 96-byte header (version, flags, duration_us, total_frames, fps, LED counts, compression, index_offset, chunk_count, reserved). Followed by Deflate-compressed chunks, each with a 32-byte chunk header (timestamp, chunk_type: keyframe/delta/RLE, compressed_size, uncompressed_size, frame_count, brightness, flags, checksum). Ends with an `IDX3` seeking index (timestamp → file_offset → chunk_index). Format detection is by magic bytes in the player; AMb2 files continue to work unchanged.
+Magic `"AMb3"` + 96-byte header (version, flags, duration_us, total_frames, fps, LED counts, compression, index_offset, chunk_count, reserved). Followed by Deflate-compressed chunks, each with a 32-byte chunk header (timestamp, chunk_type: keyframe/delta/RLE, compressed_size, uncompressed_size, frame_count, brightness, flags, reserved). Ends with an `IDX3` seeking index (timestamp → file_offset → chunk_index). Format detection is by magic bytes in the player; AMb2 files continue to work unchanged.
 
 ## LED ordering
 

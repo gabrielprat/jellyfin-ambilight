@@ -80,6 +80,12 @@ namespace Jellyfin.Plugin.Ambilight
         public bool Amb3DeltaFallbackToKeyframe { get; set; } = true;
 
         /// <summary>
+        /// Percentage of LEDs that must change between consecutive frames to trigger a scene change (forces keyframe).
+        /// Default 40 means 40% of LEDs must change significantly. Set to 0 to disable scene change detection.
+        /// </summary>
+        public int Amb3SceneChangeThreshold { get; set; } = 40;
+
+        /// <summary>
         /// When true, enables verbose logging for play/pause/seek, binary load, WLED connection and broadcast.
         /// </summary>
         public bool Debug { get; set; } = false;
