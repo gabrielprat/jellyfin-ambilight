@@ -1,6 +1,6 @@
 # Jellyfin Ambilight Plugin
 
-**Version:** 2.2.0
+**Version:** 2.3.0
 
 Transform your Jellyfin viewing experience with synchronized ambient lighting! This plugin automatically creates immersive ambilight effects for your movies and TV shows by controlling WLED-compatible LED strips.
 
@@ -45,6 +45,12 @@ WLED exposes two UDP listeners:
 | 21324 | Notifier / UDP Realtime | Protocol-wrapped (DRGB/DNRGB) | Shares socket with WLED sync, calls `strip.show()` per packet, adds ~100ms latency for large strips. Not suitable for ambilight. |
 
 Port 19446 is the only correct target for real-time ambilight streaming.
+
+### RGBW (White Channel) Not Supported
+
+The plugin sends 3-byte RGB data per LED on port 19446. WLED's Hyperion handler on this port is hardcoded to read exactly 3 bytes per LED and always sets the white channel to 0 — there is no auto-detection of RGBW and no way to send a white value through this port.
+
+RGBW strips (DRGBW protocol) are only supported on port 21324 (Notifier/UDP Realtime), which introduces protocol overhead and ~100ms latency that is unsuitable for real-time ambilight. If you own an RGBW strip, WLED will compute a white channel from the RGB values it receives — this is WLED's responsibility, not the plugin's.
 
 ## Installation
 

@@ -746,10 +746,13 @@ public sealed class AmbilightInProcessExtractor
                 continue;
             }
 
-            float scale = zoneLuminances[i] / globalAvgLum;
-            output[outBase] = (byte)Math.Clamp((int)Math.Round(zoneColors[i].r * scale), 0, 255);
-            output[outBase + 1] = (byte)Math.Clamp((int)Math.Round(zoneColors[i].g * scale), 0, 255);
-            output[outBase + 2] = (byte)Math.Clamp((int)Math.Round(zoneColors[i].b * scale), 0, 255);
+            float rawScale = zoneLuminances[i] / globalAvgLum;
+            float scale = (float)Math.Clamp(MathF.Pow(rawScale, 0.45f), 0.25f, 3.0f);
+            float maxCh = Math.Max(zoneColors[i].r, Math.Max(zoneColors[i].g, zoneColors[i].b));
+            float finalScale = maxCh > 0 ? Math.Min(scale, 255f / maxCh) : scale;
+            output[outBase] = (byte)Math.Clamp((int)Math.Round(zoneColors[i].r * finalScale), 0, 255);
+            output[outBase + 1] = (byte)Math.Clamp((int)Math.Round(zoneColors[i].g * finalScale), 0, 255);
+            output[outBase + 2] = (byte)Math.Clamp((int)Math.Round(zoneColors[i].b * finalScale), 0, 255);
         }
     }
 

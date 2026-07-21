@@ -453,6 +453,7 @@ public sealed class AmbilightInProcessPlayer : IDisposable
 
             var emaAcc = (float[]?)null;
             byte[]? lastFrameToSend = null;
+            byte[]? prevRawFrame = null;
 
             float gammaBase = (float)cfg.AmbilightGamma;
             float saturation = (float)cfg.AmbilightSaturation;
@@ -512,6 +513,8 @@ public sealed class AmbilightInProcessPlayer : IDisposable
                     startFrame = frameIndex;
                     startInstant = DateTime.UtcNow;
                     elapsedBase = TimeSpan.Zero;
+                    emaAcc = null;
+                    prevRawFrame = null;
                     if (Config.Debug)
                     {
                         _logger.LogInformation("[Ambilight] Seek to {Seconds:F3}s → frame {Frame}", seekSec.Value, frameIndex);
@@ -591,6 +594,24 @@ public sealed class AmbilightInProcessPlayer : IDisposable
                 }
 
                 var raw = frames[frameIndex];
+
+                // Scene change detection: if a large portion of LEDs changed between
+                // consecutive frames, reset EMA so colors snap to the new scene instantly
+                // instead of blending from the old one.
+                if (prevRawFrame != null && !noSmoothing)
+                {
+                    int sceneThreshold = cfg.Amb3SceneChangeThreshold;
+                    if (sceneThreshold > 0)
+                    {
+                        int changedLeds = Amb3Format.CountChangedLeds(prevRawFrame, raw, bytesPerLed, cfg.Amb3DeltaThreshold);
+                        int changedPercent = (changedLeds * 100) / totalTgt;
+                        if (changedPercent >= sceneThreshold)
+                        {
+                            emaAcc = null;
+                        }
+                    }
+                }
+                prevRawFrame = raw;
 
                 // avg luminance
                 float sumLum = 0f;
