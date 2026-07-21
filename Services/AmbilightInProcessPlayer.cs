@@ -47,6 +47,18 @@ public sealed class AmbilightInProcessPlayer : IDisposable
     private bool _isPaused;
     private double? _pendingSeekSeconds;
 
+    // Position of the frame currently being sent, in seconds from the start of the item.
+    // Written by RunAsync each iteration, read by PlaybackService to tell a real seek apart
+    // from ordinary playback progress. Long-backed because double has no volatile overload.
+    private long _positionBits = BitConverter.DoubleToInt64Bits(double.NaN);
+
+    /// <summary>
+    /// Where playback currently is, in seconds. Returns <see cref="double.NaN"/> until the
+    /// player has sent its first frame, so callers must not treat it as a position of 0.
+    /// </summary>
+    public double CurrentPositionSeconds =>
+        BitConverter.Int64BitsToDouble(Interlocked.Read(ref _positionBits));
+
     public AmbilightInProcessPlayer(ILogger logger, PluginConfiguration config)
     {
         _logger = logger;
@@ -87,6 +99,8 @@ public sealed class AmbilightInProcessPlayer : IDisposable
             _cts.Dispose();
             _cts = null;
             _playTask = null;
+            // Drop the stale position so a restarted session is not compared against the old one.
+            Interlocked.Exchange(ref _positionBits, BitConverter.DoubleToInt64Bits(double.NaN));
         }
     }
 
@@ -503,7 +517,9 @@ public sealed class AmbilightInProcessPlayer : IDisposable
 
                 if (seekSec.HasValue)
                 {
-                    var targetUs = (ulong)(Math.Max(0.0, seekSec.Value) * 1_000_000.0);
+                    // Apply the same sync lead as the initial start (effectiveStart, above),
+                    // otherwise every seek silently drops it and playback ends up running behind.
+                    var targetUs = (ulong)(Math.Max(0.0, seekSec.Value + baseSyncLead) * 1_000_000.0);
                     int targetFrame = 0;
                     while (targetFrame < timestampsUs.Count && timestampsUs[targetFrame] < targetUs)
                     {
@@ -593,6 +609,13 @@ public sealed class AmbilightInProcessPlayer : IDisposable
                     }
                 }
 
+                // Publish where we are so PlaybackService can tell a real seek from ordinary
+                // progress. The player deliberately runs baseSyncLead ahead of the video, so
+                // subtract it to report the video position this frame corresponds to.
+                Interlocked.Exchange(
+                    ref _positionBits,
+                    BitConverter.DoubleToInt64Bits((frameTs / 1_000_000.0) - baseSyncLead));
+
                 var raw = frames[frameIndex];
 
                 // Scene change detection: if a large portion of LEDs changed between
@@ -603,8 +626,11 @@ public sealed class AmbilightInProcessPlayer : IDisposable
                     int sceneThreshold = cfg.Amb3SceneChangeThreshold;
                     if (sceneThreshold > 0)
                     {
+                        // CountChangedLeds counts over the source frame, so the percentage must be
+                        // taken against the source LED count. Dividing by the target count skews the
+                        // rate whenever a .bin's LED counts differ from the device mapping's.
                         int changedLeds = Amb3Format.CountChangedLeds(prevRawFrame, raw, bytesPerLed, cfg.Amb3DeltaThreshold);
-                        int changedPercent = (changedLeds * 100) / totalTgt;
+                        int changedPercent = totalSrc > 0 ? (changedLeds * 100) / totalSrc : 0;
                         if (changedPercent >= sceneThreshold)
                         {
                             emaAcc = null;
