@@ -2,7 +2,16 @@
 
 All notable changes to the Jellyfin Ambilight Plugin will be documented in this file.
 
-## [2.2.0] - Unreleased
+## [2.3.0] - 2026-07-21
+
+### Fixed
+- **Improved bright spot colors** — Per-zone luminance scaling now applies gamma correction (power 0.45) and clamps the scale factor to a safe range (0.25–3.0×), preventing oversaturation on bright zones and artificial boost on dark zones. Individual color channels are capped at 255 to prevent clipping.
+
+### Added
+- **Scene change snapping during playback** — When a hard cut is detected (≥40% of LEDs changed between consecutive frames), the temporal smoothing accumulator resets immediately so LED colors snap to the new scene instead of blending from the previous one. Also resets on seek for instant color recovery. Threshold is configurable via `Scene Change Threshold` in plugin settings.
+- **RGBW documentation** — README now documents that RGBW LED strips are not supported through port 19446 and explains the protocol limitation.
+
+## [2.2.0] - 2026-07-20
 
 ### Added
 - **LED strip gap configuration** — Per-device `Gap Length` and `Gap Position` settings to handle physical LED strips with a data cable gap at any position. Gap LEDs are zeroed out in the output frame after Input Position rotation, matching HyperHDR's gap feature.
