@@ -1,5 +1,9 @@
 # Jellyfin Ambilight Plugin
 
+<p align="center">
+  <img src="docs/thumb.png" alt="Jellyfin Ambilight Plugin" />
+</p>
+
 **Version:** 2.3.0
 
 Transform your Jellyfin viewing experience with synchronized ambient lighting! This plugin automatically creates immersive ambilight effects for your movies and TV shows by controlling WLED-compatible LED strips.

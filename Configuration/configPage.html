@@ -860,7 +860,7 @@ the Free Software Foundation, either version 3 of the License, or
                         var libId = normalizeId(lib.Id);
                         var isExcluded = normalizedExcluded.indexOf(libId) !== -1;
                         console.log('[Ambilight] Library:', lib.Name, 'ID:', lib.Id, 'Excluded:', isExcluded);
-                        return !isExcluded && (lib.CollectionType === 'movies' || lib.CollectionType === 'tvshows');
+                        return !isExcluded;
                     });
 
                     console.log('[Ambilight] Allowed libraries:', allowedLibraries.map(l => ({ Id: l.Id, Name: l.Name })));
