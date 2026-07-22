@@ -2,6 +2,15 @@
 
 All notable changes to the Jellyfin Ambilight Plugin will be documented in this file.
 
+## [2.4.0] - 2026-07-22
+
+### Fixed
+- **Mixed library support** — The Extraction Manager now correctly lists items from "mixed movies and shows" libraries. The config page previously filtered libraries to only `movies` and `tvshows` collection types, excluding mixed libraries. The filter has been removed since the API query already specifies `IncludeItemTypes: Movie,Episode`.
+
+### Changed
+- Added centered plugin thumbnail to the README.
+- Updated plugin settings screenshot.
+
 ## [2.3.0] - 2026-07-21
 
 ### Fixed
