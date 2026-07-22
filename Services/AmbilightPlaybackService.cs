@@ -37,7 +37,6 @@ public class AmbilightPlaybackService
 
     // In-process C# players, keyed by session Id. Each session can have multiple players for multiple WLED instances.
     private readonly ConcurrentDictionary<string, List<AmbilightInProcessPlayer>> _sessionPlayers = new();
-    private readonly ConcurrentDictionary<string, double> _lastPositionSeconds = new();
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _loadingEffectCancellations = new();
 
     public AmbilightPlaybackService(
@@ -231,15 +230,29 @@ public class AmbilightPlaybackService
 
             inProc.SetPaused(paused);
 
-            var last = _lastPositionSeconds.GetOrAdd(session.Id, currSeconds);
-            _lastPositionSeconds[session.Id] = currSeconds;
+            // Compare the client's reported position against where the player actually is, not
+            // against the previous report. Consecutive reports differ by the reporting interval,
+            // so comparing them treats every report during normal playback as a seek — which then
+            // resets the smoothing accumulator and makes the LEDs flicker once per report.
+            // The player's own position only diverges from the client's on a genuine seek.
+            var playerSeconds = inProc.CurrentPositionSeconds;
+            if (double.IsNaN(playerSeconds))
+            {
+                // Player has not sent its first frame yet; nothing meaningful to compare against.
+                continue;
+            }
 
-            // Detect significant jumps (seek) – keep threshold small so manual skips resync quickly
-            if (Math.Abs(currSeconds - last) > 0.5)
+            // Tolerance covers decode/scheduling drift and clients that round position to whole
+            // seconds. Any real skip moves the position far further than this.
+            if (Math.Abs(currSeconds - playerSeconds) > 1.5)
             {
                 if (Config.Debug)
                 {
-                    _logger.LogInformation("[Ambilight] Seek detected for session {SessionId} to {Seconds:F1}s", session.Id, currSeconds);
+                    _logger.LogInformation(
+                        "[Ambilight] Seek detected for session {SessionId} to {Seconds:F1}s (player was at {PlayerSeconds:F1}s)",
+                        session.Id,
+                        currSeconds,
+                        playerSeconds);
                 }
                 inProc.Seek(currSeconds);
             }
