@@ -9,20 +9,28 @@
     "imageUrl": "https://raw.githubusercontent.com/gabrielprat/jellyfin-ambilight/refs/heads/master/docs/thumb.png",
     "versions": [
       {
+        "version": "2.4.1",
+        "changelog": "See release notes at: https://github.com/gabrielprat/jellyfin-ambilight/releases/tag/v2.4.1",
+        "targetAbi": "10.10.0.0",
+        "sourceUrl": "https://github.com/gabrielprat/jellyfin-ambilight/releases/download/v2.4.1/jellyfin-plugin-ambilight_2.4.1.zip",
+        "checksum": "E1EE07690BC57361AAD4D0757AC0D009",
+        "timestamp": "2026-07-22T08:34:57Z"
+      },
+      {
+        "version": "2.4.0",
+        "changelog": "See release notes at: https://github.com/gabrielprat/jellyfin-ambilight/releases/tag/v2.4.0",
+        "targetAbi": "10.10.0.0",
+        "sourceUrl": "https://github.com/gabrielprat/jellyfin-ambilight/releases/download/v2.4.0/jellyfin-plugin-ambilight_2.4.0.zip",
+        "checksum": "A59B746D8C43DCE133808F857481D734",
+        "timestamp": "2026-07-22T08:21:26Z"
+      },
+      {
         "version": "2.3.0",
         "changelog": "# Release Notes - v2.3.0\n\n## Improved Bright Spot Colors\n\nPer-zone luminance scaling in the extractor now applies gamma correction (power 0.45) and clamps the scale factor to a safe range (0.25–3.0×). Individual color channels are also capped at 255 to prevent clipping. Bright areas of the video now produce vibrant but non-washed-out LED colors, and dark zones no longer get artificially boosted.\n\n## Scene Change Snapping During Playback\n\nWhen a hard cut is detected during playback (≥40% of LEDs changed between consecutive frames, configurable via **Scene Change Threshold**), the temporal smoothing accumulator resets immediately so LED colors snap to the new scene instead of blending from the previous one for several frames. EMA is also reset on seek for instant color recovery.\n\n## RGBW Documentation\n\nThe README now documents that RGBW LED strips are not supported through the plugin's UDP port 19446, and explains the protocol limitation for users with RGBW hardware.\n",
         "targetAbi": "10.10.0.0",
         "sourceUrl": "https://github.com/gabrielprat/jellyfin-ambilight/releases/download/v2.3.0/jellyfin-plugin-ambilight_2.3.0.zip",
         "checksum": "C8F871169226B31D134796398BBD7F2A",
         "timestamp": "2026-07-21T09:54:07Z"
-      },
-      {
-        "version": "2.3.0",
-        "changelog": "See release notes at: https://github.com/gabrielprat/jellyfin-ambilight/releases/tag/v2.3.0",
-        "targetAbi": "10.10.0.0",
-        "sourceUrl": "https://github.com/gabrielprat/jellyfin-ambilight/releases/download/v2.3.0/jellyfin-plugin-ambilight_2.3.0.zip",
-        "checksum": "",
-        "timestamp": ""
       },
       {
         "version": "2.2.0",
