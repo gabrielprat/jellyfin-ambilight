@@ -9,6 +9,14 @@
     "imageUrl": "https://raw.githubusercontent.com/gabrielprat/jellyfin-ambilight/refs/heads/master/docs/thumb.png",
     "versions": [
       {
+        "version": "2.4.2",
+        "changelog": "See release notes at: https://github.com/gabrielprat/jellyfin-ambilight/releases/tag/v2.4.2",
+        "targetAbi": "10.10.0.0",
+        "sourceUrl": "https://github.com/gabrielprat/jellyfin-ambilight/releases/download/v2.4.2/jellyfin-plugin-ambilight_2.4.2.zip",
+        "checksum": "",
+        "timestamp": "2026-07-22T10:00:00Z"
+      },
+      {
         "version": "2.4.1",
         "changelog": "See release notes at: https://github.com/gabrielprat/jellyfin-ambilight/releases/tag/v2.4.1",
         "targetAbi": "10.10.0.0",
