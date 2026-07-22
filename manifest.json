@@ -25,14 +25,6 @@
         "timestamp": "2026-07-21T09:54:07Z"
       },
       {
-        "version": "2.3.0",
-        "changelog": "See release notes at: https://github.com/gabrielprat/jellyfin-ambilight/releases/tag/v2.3.0",
-        "targetAbi": "10.10.0.0",
-        "sourceUrl": "https://github.com/gabrielprat/jellyfin-ambilight/releases/download/v2.3.0/jellyfin-plugin-ambilight_2.3.0.zip",
-        "checksum": "",
-        "timestamp": ""
-      },
-      {
         "version": "2.2.0",
         "changelog": "See release notes at: https://github.com/gabrielprat/jellyfin-ambilight/releases/tag/v2.2.0",
         "targetAbi": "10.10.0.0",
