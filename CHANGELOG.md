@@ -4,6 +4,8 @@ All notable changes to the Jellyfin Ambilight Plugin will be documented in this 
 
 ## [Unreleased]
 
+## [2.4.2] - 2026-07-22
+
 ### Fixed
 - **LEDs flickered roughly once per second during normal playback** — Seek detection compared each playback progress report against the *previous* report, so the difference during steady playback was simply the reporting interval (~1s) and always exceeded the 0.5s threshold. Every progress report was therefore treated as a seek. This misclassification dates back to 1.0.0 but was harmless until 2.3.0 added an EMA reset to the seek path, at which point each false seek began discarding the smoothing accumulator and producing a visible jump. Seek detection now compares the client's reported position against the player's own position, which is independent of the reporting interval.
 - **Sync lead was lost on every seek** — `AmbilightSyncLeadSeconds` was applied only when playback started, so any seek left the ambilight running behind the picture by that amount. It is now applied on seek as well.
