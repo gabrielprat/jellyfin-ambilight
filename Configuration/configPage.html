@@ -113,6 +113,15 @@ the Free Software Foundation, either version 3 of the License, or
                         </div>
                     </div>
 
+                    <div class="selectContainer" style="margin-top: 1.5em;">
+                        <label class="selectLabel" for="AmbilightExtractionMethod">Extraction logic</label>
+                        <select is="emby-select" id="AmbilightExtractionMethod" class="emby-select-withcolor emby-select">
+                            <option value="edge_weighted">Sobel edge-weighted extraction</option>
+                            <option value="linear_light_average">Linear-light averaging</option>
+                        </select>
+                        <div class="fieldDescription">How each LED zone's color is derived from the picture. "Sobel edge-weighted extraction" (default) biases each zone toward high-contrast pixels and rescales zones by relative brightness, which keeps the strip lively but makes dark scenes read brighter than the picture. "Linear-light averaging" takes a plain mean of every pixel in the zone in linear light, so a dark zone averages dark and a black frame produces black LEDs. Changing this requires re-extracting existing items — previously extracted files are not converted.</div>
+                    </div>
+
                     <div class="inputContainer" style="margin-top: 1.5em;">
                         <label class="inputLabel inputLabelUnfocused" for="AmbilightDataFolder">Ambilight data folder</label>
                         <div style="display: flex; gap: 0.5em; align-items: center;">
@@ -312,6 +321,7 @@ the Free Software Foundation, either version 3 of the License, or
                         document.querySelector('#AmbilightBottomLedCount').value = config.AmbilightBottomLedCount;
                         document.querySelector('#AmbilightLeftLedCount').value = config.AmbilightLeftLedCount;
                         document.querySelector('#AmbilightRightLedCount').value = config.AmbilightRightLedCount;
+                        document.querySelector('#AmbilightExtractionMethod').value = config.AmbilightExtractionMethod || 'edge_weighted';
                         document.querySelector('#AmbilightGamma').value = config.AmbilightGamma;
                         document.querySelector('#AmbilightSaturation').value = config.AmbilightSaturation;
 
@@ -347,6 +357,7 @@ the Free Software Foundation, either version 3 of the License, or
                     config.AmbilightBottomLedCount = document.querySelector('#AmbilightBottomLedCount').value;
                     config.AmbilightLeftLedCount = document.querySelector('#AmbilightLeftLedCount').value;
                     config.AmbilightRightLedCount = document.querySelector('#AmbilightRightLedCount').value;
+                    config.AmbilightExtractionMethod = document.querySelector('#AmbilightExtractionMethod').value || 'edge_weighted';
                     config.AmbilightGamma = document.querySelector('#AmbilightGamma').value;
                     config.AmbilightSaturation = document.querySelector('#AmbilightSaturation').value;
 
