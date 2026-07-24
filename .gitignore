@@ -72,8 +72,4 @@ ehthumbs.db
 local.settings.json
 .env.local
 
-# Local tooling and specs
-.opencode/
-specs/
-
 # Maintained by github workflow
