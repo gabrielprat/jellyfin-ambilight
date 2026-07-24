@@ -1,3 +1,6 @@
+# opencode
+.opencode/
+
 # Build output
 bin/
 obj/
