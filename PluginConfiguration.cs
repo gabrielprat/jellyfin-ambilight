@@ -99,5 +99,12 @@ namespace Jellyfin.Plugin.Ambilight
         public int InputPosition { get; set; } = 0;
         public int GapLength { get; set; } = 0;
         public int GapPosition { get; set; } = 0;
+
+        /// <summary>
+        /// Signed fine-tuning offset, in milliseconds, for the ambilight data sent to this WLED device.
+        /// Positive values delay the data (LEDs react later); negative values advance it (LEDs react earlier).
+        /// Applied on top of the global sync lead to correct per-device sync issues.
+        /// </summary>
+        public int SignalDelayMs { get; set; } = 0;
     }
 }

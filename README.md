@@ -158,6 +158,7 @@ Configure which Jellyfin devices should trigger ambilight effects and where to s
      - continue clockwise around the screen
    - **Gap Length** - Number of inactive LEDs at the gap position (include in the corresponding edge's LED count). Set to0 for no gap.
    - **Gap Position** - LED index where the gap starts, counting from 0 at top-left, clockwise (same coordinate system as Input Position). For example, if Top=50 and Right=25, the start of the bottom edge is index75.
+   - **Signal Delay (ms)** - Signed fine-tuning offset in milliseconds for the ambilight data sent to this WLED device. Positive values delay the data (LEDs react later); negative values advance it (LEDs react earlier). Applied on top of the global sync lead to correct per-device sync issues.
 5. **Save** - Click the Save button at the bottom
 6. **Repeat** - Add more mappings as needed
 

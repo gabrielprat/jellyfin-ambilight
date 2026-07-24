@@ -697,6 +697,10 @@ the Free Software Foundation, either version 3 of the License, or
                         <label style="display: block; margin-bottom: 0.25em; font-size: 0.9em; opacity: 0.8;">Input Position</label>
                         <input type="number" class="mapping-input-pos emby-input" min="0" is="emby-input" />
                     </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 0.25em; font-size: 0.9em; opacity: 0.8;">Signal Delay (ms)</label>
+                        <input type="number" class="mapping-signal-delay emby-input" step="1" is="emby-input" />
+                    </div>
                 `;
                 
                 wrapper.appendChild(ledConfig);
@@ -753,6 +757,7 @@ the Free Software Foundation, either version 3 of the License, or
                 wrapper.querySelector('.mapping-left').value = mapping.LeftLedCount || 49;
                 wrapper.querySelector('.mapping-right').value = mapping.RightLedCount || 49;
                 wrapper.querySelector('.mapping-input-pos').value = mapping.InputPosition || 0;
+                wrapper.querySelector('.mapping-signal-delay').value = mapping.SignalDelayMs || 0;
                 wrapper.querySelector('.mapping-gap-length').value = gapLength;
                 wrapper.querySelector('.mapping-gap-position').value = gapPosition;
             }
@@ -806,6 +811,7 @@ the Free Software Foundation, either version 3 of the License, or
                                 LeftLedCount: parseInt(row.querySelector('.mapping-left').value) || 49,
                                 RightLedCount: parseInt(row.querySelector('.mapping-right').value) || 49,
                                 InputPosition: parseInt(row.querySelector('.mapping-input-pos').value) || 0,
+                                SignalDelayMs: parseInt(row.querySelector('.mapping-signal-delay').value) || 0,
                                 GapLength: parseInt(row.querySelector('.mapping-gap-length').value) || 0,
                                 GapPosition: parseInt(row.querySelector('.mapping-gap-position').value) || 0
                             });

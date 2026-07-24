@@ -448,7 +448,11 @@ public sealed class AmbilightInProcessPlayer : IDisposable
                 _logger.LogInformation("[Ambilight] Connected to WLED at {Host}:{Port}", mapping.Host, WledUdpPort);
             }
 
-            double baseSyncLead = cfg.AmbilightSyncLeadSeconds;
+            // Global sync lead runs the player ahead of the video. The per-mapping signal delay
+            // fine-tunes this for a single WLED device: a positive delay makes the LEDs react
+            // later (reduce the lead), a negative value makes them react earlier (increase it).
+            double signalDelaySeconds = mapping.SignalDelayMs / 1000.0;
+            double baseSyncLead = cfg.AmbilightSyncLeadSeconds - signalDelaySeconds;
             double effectiveStart = Math.Max(0.0, startSeconds + baseSyncLead);
             ulong startTsUs = (ulong)(effectiveStart * 1_000_000.0);
             int startFrame = 0;
