@@ -26,4 +26,24 @@ public static class ExtractionLogicFactory
         LinearLightAverage => new LinearLightAverageExtractionLogic(),
         _ => new EdgeWeightedExtractionLogic(),
     };
+
+    /// <summary>
+    /// Maps a config method value to the byte code stored in the AMb3 header.
+    /// Unknown/missing values map to the default edge-weighted code.
+    /// </summary>
+    public static byte ToFormatCode(string? method) => method switch
+    {
+        LinearLightAverage => Amb3Format.ExtractionLogicLinearLightAverage,
+        _ => Amb3Format.ExtractionLogicEdgeWeighted,
+    };
+
+    /// <summary>
+    /// Human-readable label for an extraction-logic header byte, for display on the extraction page.
+    /// </summary>
+    public static string DisplayName(byte formatCode) => formatCode switch
+    {
+        Amb3Format.ExtractionLogicLinearLightAverage => "Linear-light averaging",
+        Amb3Format.ExtractionLogicEdgeWeighted => "Sobel edge-weighted",
+        _ => "Unknown",
+    };
 }

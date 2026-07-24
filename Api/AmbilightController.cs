@@ -15,6 +15,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Ambilight.Server;
 using Jellyfin.Plugin.Ambilight.Services;
+using Jellyfin.Plugin.Ambilight.Services.Extraction;
 using Jellyfin.Plugin.Ambilight.Tasks;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Tasks;
@@ -144,6 +145,9 @@ public class AmbilightController : ControllerBase
                     binaryFormat = BinaryFormatDetector.DetectFormat(binPath);
                 }
 
+                // Extraction logic is stored in the AMb3 header, so read it from the file.
+                string? extractionLogicName = BinaryFormatDetector.DetectExtractionLogic(binPath);
+
                 results[itemId] = new AmbilightStatusResponse
                 {
                     ItemId = guid,
@@ -155,7 +159,8 @@ public class AmbilightController : ControllerBase
                     ExtractionProgress = extractionProgress,
                     ExtractionFramesCurrent = extractionFramesCurrent,
                     ExtractionFramesTotal = extractionFramesTotal,
-                    BinaryFormat = binaryFormat
+                    BinaryFormat = binaryFormat,
+                    ExtractionLogic = extractionLogicName
                 };
             }
 
@@ -263,6 +268,9 @@ public class AmbilightController : ControllerBase
                 binaryFormat = BinaryFormatDetector.DetectFormat(binPath);
             }
 
+            // Extraction logic is stored in the AMb3 header, so read it from the file.
+            string? extractionLogicName = BinaryFormatDetector.DetectExtractionLogic(binPath);
+
             var status = new AmbilightStatusResponse
             {
                 ItemId = guid,
@@ -274,7 +282,8 @@ public class AmbilightController : ControllerBase
                 ExtractionProgress = extractionProgress,
                 ExtractionFramesCurrent = extractionFramesCurrent,
                 ExtractionFramesTotal = extractionFramesTotal,
-                BinaryFormat = binaryFormat
+                BinaryFormat = binaryFormat,
+                ExtractionLogic = extractionLogicName
             };
 
             return Ok(status);
@@ -511,6 +520,12 @@ public class AmbilightStatusResponse
     public ulong ExtractionFramesCurrent { get; set; }
     public ulong ExtractionFramesTotal { get; set; }
     public string? BinaryFormat { get; set; }
+
+    /// <summary>
+    /// Human-readable name of the extraction logic that produced the binary (AMb3 only), e.g.
+    /// "Sobel edge-weighted" or "Linear-light averaging". Null for non-AMb3 or missing files.
+    /// </summary>
+    public string? ExtractionLogic { get; set; }
 }
 
 public class AmbilightExtractResponse
@@ -556,5 +571,15 @@ internal static class BinaryFormatDetector
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Reads the extraction-logic name from an AMb3 file header. Returns null for non-AMb3 or
+    /// missing files. Files predating the field read back as the default edge-weighted logic.
+    /// </summary>
+    public static string? DetectExtractionLogic(string binPath)
+    {
+        var code = Amb3Format.ReadExtractionLogic(binPath);
+        return code == null ? null : ExtractionLogicFactory.DisplayName(code.Value);
     }
 }

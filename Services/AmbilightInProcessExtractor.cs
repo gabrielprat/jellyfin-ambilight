@@ -361,7 +361,8 @@ public sealed class AmbilightInProcessExtractor
                 compression: Amb3Format.CompressionDeflate,
                 qualityLevel: Amb3Format.QualityHigh,
                 indexOffset: 0, // backpatched after index is written
-                chunkCount: 0); // backpatched after all chunks written
+                chunkCount: 0, // backpatched after all chunks written
+                extractionLogic: ExtractionLogicFactory.ToFormatCode(cfg.AmbilightExtractionMethod));
 
             ulong frameIndex = 0;
             var zoning = zones.ToArray();
