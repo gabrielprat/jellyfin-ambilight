@@ -475,6 +475,13 @@ public sealed class AmbilightInProcessPlayer : IDisposable
             float gammaRed = ClampF((float)cfg.AmbilightGammaRed, 0.1f, 5.0f);
             float gammaGreen = ClampF((float)cfg.AmbilightGammaGreen, 0.1f, 5.0f);
             float gammaBlue = ClampF((float)cfg.AmbilightGammaBlue, 0.1f, 5.0f);
+
+            // The tone curve depends on how the file was extracted (stored in the AMb3 header).
+            // Linear-light-averaged files are already picture-faithful, so we apply gamma directly
+            // instead of the scene-adaptive lift. AMb2 / older files read back as edge-weighted and
+            // keep the original behaviour.
+            byte extractionLogicCode = Amb3Format.ReadExtractionLogic(binPath) ?? Amb3Format.ExtractionLogicEdgeWeighted;
+            bool linearLightExtraction = extractionLogicCode == Amb3Format.ExtractionLogicLinearLightAverage;
             int inputPosition = mapping.InputPosition;
             int gapLength = mapping.GapLength;
             int gapPosition = mapping.GapPosition;
@@ -639,23 +646,35 @@ public sealed class AmbilightInProcessPlayer : IDisposable
                 }
                 prevRawFrame = raw;
 
-                // avg luminance
-                float sumLum = 0f;
-                int countPix = 0;
-                int idx = 0;
-                while (idx + 2 < raw.Length)
+                // Output gamma exponent for this frame. For linear-light files, apply the user's
+                // gamma directly, so exponents above 1 darken and dark scenes stay dark. Otherwise
+                // invert it into a scene-adaptive lift that brightens dark scenes, matching the
+                // original edge-weighted behaviour. The mean-luminance pass only feeds that lift, so
+                // it is skipped for linear-light files.
+                float outputGamma;
+                if (linearLightExtraction)
                 {
-                    float r = raw[idx];
-                    float g = raw[idx + 1];
-                    float b = raw[idx + 2];
-                    float lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
-                    sumLum += lum;
-                    countPix++;
-                    idx += bytesPerLed;
+                    outputGamma = ClampF(gammaBase, 0.1f, 5.0f);
                 }
-                float avgLum = countPix > 0 ? sumLum / countPix : 0f;
-                float gammaAdj = ClampF(gammaBase * (1.0f - (avgLum / 255.0f) * 0.6f), 1.0f, 3.0f);
-                float invGamma = 1.0f / gammaAdj;
+                else
+                {
+                    float sumLum = 0f;
+                    int countPix = 0;
+                    int idx = 0;
+                    while (idx + 2 < raw.Length)
+                    {
+                        float r = raw[idx];
+                        float g = raw[idx + 1];
+                        float b = raw[idx + 2];
+                        float lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+                        sumLum += lum;
+                        countPix++;
+                        idx += bytesPerLed;
+                    }
+                    float avgLum = countPix > 0 ? sumLum / countPix : 0f;
+                    float gammaAdj = ClampF(gammaBase * (1.0f - (avgLum / 255.0f) * 0.6f), 1.0f, 3.0f);
+                    outputGamma = 1.0f / gammaAdj;
+                }
 
                 float frameDtS;
                 if (frameIndex == 0)
@@ -715,9 +734,9 @@ public sealed class AmbilightInProcessPlayer : IDisposable
                     float gSat = ClampF(avgIntensity + (gLin - avgIntensity) * sUser, 0.0f, 1.0f);
                     float bSat = ClampF(avgIntensity + (bLin - avgIntensity) * sUser, 0.0f, 1.0f);
 
-                    float rG = ClampF((float)MathF.Pow(rSat, invGamma), 0.0f, 1.0f);
-                    float gG = ClampF((float)MathF.Pow(gSat, invGamma), 0.0f, 1.0f);
-                    float bG = ClampF((float)MathF.Pow(bSat, invGamma), 0.0f, 1.0f);
+                    float rG = ClampF((float)MathF.Pow(rSat, outputGamma), 0.0f, 1.0f);
+                    float gG = ClampF((float)MathF.Pow(gSat, outputGamma), 0.0f, 1.0f);
+                    float bG = ClampF((float)MathF.Pow(bSat, outputGamma), 0.0f, 1.0f);
 
                     float rF = rG * 255.0f;
                     float gF = gG * 255.0f;

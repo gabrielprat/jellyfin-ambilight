@@ -19,8 +19,7 @@ public sealed class LinearLightAverageExtractionLogic : IExtractionLogic
 {
     // sRGB transfer function tables. Averaging must happen in linear light: because the sRGB
     // encoding is concave, the mean of encoded values always decodes brighter than the true mean,
-    // and the error peaks on zones mixing dark pixels with highlights. HyperHDR does the same
-    // (ImageColorAveraging::calcMulticolorForLeds).
+    // and the error peaks on zones mixing dark pixels with highlights.
     private static readonly float[] SrgbToLinear = BuildSrgbToLinear();
 
     private static float[] BuildSrgbToLinear()
