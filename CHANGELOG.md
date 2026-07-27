@@ -2,10 +2,16 @@
 
 All notable changes to the Jellyfin Ambilight Plugin will be documented in this file.
 
-## [Unreleased]
+## [2.5.0] - 2026-07-27
 
 ### Added
+- **Selectable extraction logic** — New per-zone color algorithm chosen from the config page. "Sobel edge-weighted" (default) keeps the existing edge detection + relative-luminance rescaling, which keeps the strip lively but makes dark scenes read brighter. "Linear-light averaging" takes a plain unweighted mean of each zone's pixels in linear light (via sRGB→linear lookup tables), so dark zones average dark and black frames produce black LEDs. Switching methods requires re-extraction. Backed by the `IExtractionLogic` strategy pattern for easy future additions.
 - **Per-device signal delay** — New signed `Signal Delay (ms)` setting on each WLED device mapping. Positive values delay the ambilight data (LEDs react later); negative values advance it (LEDs react earlier). Applied on top of the global sync lead to fine-tune sync issues on a specific device.
+
+### Changed
+- **Playback tone curve adapts to extraction method** — The player reads the extraction logic from the AMb3 header and selects the appropriate tone curve. Linear-light files apply the user's gamma directly (`pow(x, gamma)`, exponents above 1 darken) and skip the mean-luminance pass. Edge-weighted, AMb2, and older files keep the existing scene-adaptive lift. No new config option; already-extracted files benefit without re-extraction.
+- **Extraction Manager table** — New "Logic" column shows which extraction method produced each binary.
+- **Status API** — Responses now include an `ExtractionLogic` field read from the file header.
 
 ## [2.4.2] - 2026-07-22
 
