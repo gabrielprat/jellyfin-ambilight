@@ -57,6 +57,17 @@ public static class Amb3Format
     public const byte QualityMedium = 1;
     public const byte QualityLow = 2;
 
+    // Extraction logic — which per-zone color algorithm produced the file.
+    // Stored in the first reserved header byte; 0 is the historical default so files written
+    // before this field existed (all-zero reserved bytes) correctly read as edge-weighted.
+    public const byte ExtractionLogicEdgeWeighted = 0;
+    public const byte ExtractionLogicLinearLightAverage = 1;
+
+    // Byte offset of the extraction_logic field within the header:
+    // magic(4) + version(1) + flags(4) + duration(8) + frames(8) + fps(4) + leds(8)
+    // + color_fmt(1) + compression(1) + quality(1) + colorspace(1) + index_offset(8) + chunk_count(4) = 53
+    public const int ExtractionLogicHeaderOffset = 53;
+
     // Index magic
     public static readonly byte[] IndexMagic = Encoding.ASCII.GetBytes("IDX3");
 
@@ -85,7 +96,8 @@ public static class Amb3Format
         byte compression,
         byte qualityLevel,
         ulong indexOffset,
-        uint chunkCount)
+        uint chunkCount,
+        byte extractionLogic = ExtractionLogicEdgeWeighted)
     {
         // magic
         w.Write((byte)'A');
@@ -119,8 +131,43 @@ public static class Amb3Format
         w.Write(indexOffset);
         // chunk_count (4 bytes)
         w.Write(chunkCount);
-        // reserved (32 bytes)
-        w.Write(new byte[32]);
+        // reserved (32 bytes) — first byte carries extraction_logic, rest zero
+        w.Write(extractionLogic);
+        w.Write(new byte[31]);
+    }
+
+    /// <summary>
+    /// Reads the extraction_logic byte from an AMb3 file header. Returns null if the file is
+    /// missing, too short, or not an AMb3 file. Files predating this field read back as
+    /// <see cref="ExtractionLogicEdgeWeighted"/> (0), which matches their actual behaviour.
+    /// </summary>
+    public static byte? ReadExtractionLogic(string binPath)
+    {
+        try
+        {
+            if (!File.Exists(binPath))
+                return null;
+
+            using var fs = File.OpenRead(binPath);
+            var head = new byte[ExtractionLogicHeaderOffset + 1];
+            int read = 0;
+            while (read < head.Length)
+            {
+                int n = fs.Read(head, read, head.Length - read);
+                if (n <= 0)
+                    break;
+                read += n;
+            }
+
+            if (read < head.Length || !IsAm3Magic(head.AsSpan(0, 4)))
+                return null;
+
+            return head[ExtractionLogicHeaderOffset];
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public static void BackpatchHeaderIndexOffset(Stream stream, ulong indexOffset)

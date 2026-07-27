@@ -31,6 +31,14 @@ namespace Jellyfin.Plugin.Ambilight
         public int AmbilightBottomLedCount { get; set; } = 89;
         public int AmbilightLeftLedCount { get; set; } = 49;
         public int AmbilightRightLedCount { get; set; } = 49;
+
+        /// <summary>
+        /// Which per-zone extraction logic to use when creating binary files.
+        /// "edge_weighted" (default) biases each zone toward high-contrast pixels with Sobel edge
+        /// detection and rescales by relative luminance; "linear_light_average" takes a plain mean of
+        /// every pixel in linear light. Changing this requires re-extracting existing items.
+        /// </summary>
+        public string AmbilightExtractionMethod { get; set; } = "edge_weighted";
         // Ambilight Visual Settings (global preferences)
         public double AmbilightSyncLeadSeconds { get; set; } = 0.2;
         /// <summary>

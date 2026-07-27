@@ -113,6 +113,15 @@ the Free Software Foundation, either version 3 of the License, or
                         </div>
                     </div>
 
+                    <div class="selectContainer" style="margin-top: 1.5em;">
+                        <label class="selectLabel" for="AmbilightExtractionMethod">Extraction logic</label>
+                        <select is="emby-select" id="AmbilightExtractionMethod" class="emby-select-withcolor emby-select">
+                            <option value="edge_weighted">Sobel edge-weighted extraction</option>
+                            <option value="linear_light_average">Linear-light averaging</option>
+                        </select>
+                        <div class="fieldDescription">How each LED zone's color is derived from the picture. "Sobel edge-weighted extraction" (default) biases each zone toward high-contrast pixels and rescales zones by relative brightness, which keeps the strip lively but makes dark scenes read brighter than the picture. "Linear-light averaging" takes a plain mean of every pixel in the zone in linear light, so a dark zone averages dark and a black frame produces black LEDs. Changing this requires re-extracting existing items — previously extracted files are not converted.</div>
+                    </div>
+
                     <div class="inputContainer" style="margin-top: 1.5em;">
                         <label class="inputLabel inputLabelUnfocused" for="AmbilightDataFolder">Ambilight data folder</label>
                         <div style="display: flex; gap: 0.5em; align-items: center;">
@@ -276,6 +285,7 @@ the Free Software Foundation, either version 3 of the License, or
                                     <th>Added Date</th>
                                     <th>Status</th>
                                     <th>Format</th>
+                                    <th>Logic</th>
                                     <th>Size</th>
                                     <th>Action</th>
                                 </tr>
@@ -312,6 +322,7 @@ the Free Software Foundation, either version 3 of the License, or
                         document.querySelector('#AmbilightBottomLedCount').value = config.AmbilightBottomLedCount;
                         document.querySelector('#AmbilightLeftLedCount').value = config.AmbilightLeftLedCount;
                         document.querySelector('#AmbilightRightLedCount').value = config.AmbilightRightLedCount;
+                        document.querySelector('#AmbilightExtractionMethod').value = config.AmbilightExtractionMethod || 'edge_weighted';
                         document.querySelector('#AmbilightGamma').value = config.AmbilightGamma;
                         document.querySelector('#AmbilightSaturation').value = config.AmbilightSaturation;
 
@@ -347,6 +358,7 @@ the Free Software Foundation, either version 3 of the License, or
                     config.AmbilightBottomLedCount = document.querySelector('#AmbilightBottomLedCount').value;
                     config.AmbilightLeftLedCount = document.querySelector('#AmbilightLeftLedCount').value;
                     config.AmbilightRightLedCount = document.querySelector('#AmbilightRightLedCount').value;
+                    config.AmbilightExtractionMethod = document.querySelector('#AmbilightExtractionMethod').value || 'edge_weighted';
                     config.AmbilightGamma = document.querySelector('#AmbilightGamma').value;
                     config.AmbilightSaturation = document.querySelector('#AmbilightSaturation').value;
 
@@ -1176,7 +1188,7 @@ the Free Software Foundation, either version 3 of the License, or
                             extractPendingBtnHtml = '<button is="emby-button" class="emby-button raised btnExtractPending" data-scope="series" data-id="' + seriesId + '" style="margin-left: 10px; padding: 0.2em 0.5em; font-size: 0.8em; z-index: 10; float: right;">Extract all pending</button>';
                         }
                         
-                        seriesRow.innerHTML = '<td colspan="5"><span class="material-icons" style="vertical-align: middle; font-size: 1.2em;">' + seriesExpandIcon + '</span> ' + 
+                        seriesRow.innerHTML = '<td colspan="6"><span class="material-icons" style="vertical-align: middle; font-size: 1.2em;">' + seriesExpandIcon + '</span> ' +
                             escapeHtml(series.name) + seriesStatusHtml + seriesStatsHtml + extractPendingBtnHtml + '</td>';
                         seriesRow.setAttribute('data-series-id', seriesCollapsedId);
                         seriesRow.setAttribute('data-collapsed', isSeriesCollapsed ? 'true' : 'false');
@@ -1232,7 +1244,7 @@ the Free Software Foundation, either version 3 of the License, or
                                 seasonExtractPendingBtnHtml = '<button is="emby-button" class="emby-button raised btnExtractPending" data-scope="season" data-id="' + seasonId + '" style="margin-left: 10px; padding: 0.2em 0.5em; font-size: 0.8em; z-index: 10; float: right;">Extract Season ' + seasonNumber + ' pending</button>';
                             }
                             
-                            seasonRow.innerHTML = '<td colspan="5"><span style="padding-left: 1.5em;"><span class="material-icons" style="vertical-align: middle; font-size: 1.2em;">' + seasonExpandIcon + '</span> ' + 
+                            seasonRow.innerHTML = '<td colspan="6"><span style="padding-left: 1.5em;"><span class="material-icons" style="vertical-align: middle; font-size: 1.2em;">' + seasonExpandIcon + '</span> ' +
                                 seasonName + seasonStatusHtml + seasonStatsHtml + '</span>' + seasonExtractPendingBtnHtml + '</td>';
                             seasonRow.setAttribute('data-season-id', seasonId);
                             seasonRow.setAttribute('data-collapsed', isSeasonCollapsed ? 'true' : 'false');
@@ -1519,10 +1531,16 @@ the Free Software Foundation, either version 3 of the License, or
                     formatText = '<span style="text-transform:uppercase;font-weight:bold;font-size:0.85em;color:#9ca3af;">' + escapeHtml(status.BinaryFormat) + '</span>';
                 }
 
+                var logicText = '-';
+                if (status && status.HasBinary && status.ExtractionLogic) {
+                    logicText = '<span style="font-size:0.85em;color:#9ca3af;" title="Extraction logic used for this binary">' + escapeHtml(status.ExtractionLogic) + '</span>';
+                }
+
                 var trContent = '<td style="padding-top:1em;padding-bottom:1em;">' + titleCellHtml + '</td>' +
                     '<td>' + addedDateText + '</td>' +
                     '<td>' + statusHtml + '</td>' +
                     '<td>' + formatText + '</td>' +
+                    '<td>' + logicText + '</td>' +
                     '<td>' + sizeText + '</td>' +
                     '<td>' + btnHtml + '</td>';
 
