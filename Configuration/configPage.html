@@ -119,7 +119,7 @@ the Free Software Foundation, either version 3 of the License, or
                             <option value="edge_weighted">Sobel edge-weighted extraction</option>
                             <option value="linear_light_average">Linear-light averaging</option>
                         </select>
-                        <div class="fieldDescription">How each LED zone's color is derived from the picture. "Sobel edge-weighted extraction" (default) biases each zone toward high-contrast pixels and rescales zones by relative brightness, which keeps the strip lively but makes dark scenes read brighter than the picture. "Linear-light averaging" takes a plain mean of every pixel in the zone in linear light, so a dark zone averages dark and a black frame produces black LEDs. Changing this requires re-extracting existing items — previously extracted files are not converted.</div>
+                        <div class="fieldDescription">How each LED zone's color is derived from the picture. "Sobel edge-weighted extraction" (default) biases each zone toward high-contrast pixels and rescales zones by relative brightness, which keeps the strip lively but makes dark scenes read brighter than the picture. "Linear-light averaging" takes a plain mean of every pixel in the zone in linear light, so a dark zone averages dark and a black frame produces black LEDs. <strong>Note:</strong> With linear-light averaging, the Base gamma is applied directly instead of as a lift, so the default 2.2 will appear dark — lower it to ~1.3–1.5 for a picture-faithful result. Changing this requires re-extracting existing items — previously extracted files are not converted.</div>
                     </div>
 
                     <div class="inputContainer" style="margin-top: 1.5em;">
@@ -499,9 +499,9 @@ the Free Software Foundation, either version 3 of the License, or
                     if (e.target === modal) modal.style.display = 'none';
                 });
             })();
+            // ===== MANAGER TAB LOGIC ===== v2.5.0 - Selectable extraction logic + signal delay
 
-            // ===== MANAGER TAB LOGIC ===== v2.4.2 - Fix LEDs flickering once per second
-            console.log('[Ambilight] Config v2.4.2 - Fix LEDs flickering once per second');
+            console.log('[Ambilight] Config v2.5.0 - Selectable extraction logic + signal delay');
             
             let allVideos = [];
             let currentFilter = '';

@@ -4,7 +4,7 @@
   <img src="docs/thumb.png" alt="Jellyfin Ambilight Plugin" />
 </p>
 
-**Version:** 2.4.2
+**Version:** 2.5.0
 
 Transform your Jellyfin viewing experience with synchronized ambient lighting! This plugin automatically creates immersive ambilight effects for your movies and TV shows by controlling WLED-compatible LED strips.
 
@@ -138,6 +138,7 @@ Controls how and when the plugin processes videos:
 **Extraction LED Configuration:**
 
 - **Top/Bottom/Left/Right LED counts** - Default LED strip layout used when creating binary files (default: 89/89/49/49)
+- **Extraction logic** - How each LED zone's color is derived from the picture. "Sobel edge-weighted" (default) biases each zone toward high-contrast pixels and rescales by relative luminance, keeping the strip lively but making dark scenes read brighter than the picture. "Linear-light averaging" takes a plain mean of every pixel in the zone in linear light, so dark zones average dark and black frames produce black LEDs. **Note:** With this method, the Base gamma is applied directly (exponents > 1 darken), so the default 2.2 may appear too dark — lower it to ~1.3–1.5 for a picture-faithful result. Changing this requires re-extracting existing items.
 - **Ambilight data folder** - Where to store extracted `.bin` files (default: `/data/ambilight`)
 
 The extracted data can be automatically scaled to match different LED layouts during playback (configured per device mapping below).
@@ -176,7 +177,7 @@ Configure which Jellyfin devices should trigger ambilight effects and where to s
 Fine-tune the appearance and behavior of your ambilight effects:
 
 - **Smoothing window** - Time window for temporal smoothing between frames in seconds (default: 0.06). Set to 0 to disable. Higher values = smoother but more delayed; lower values = more responsive but can flicker on rapid cuts
-- **Base gamma** - Overall gamma curve (default: 2.2). Higher values make mid-tones and highlights darker
+- **Base gamma** - Overall gamma curve (default: 2.2). For edge-weighted extraction, higher values make mid-tones and highlights darker. For linear-light extraction, gamma is applied directly instead of as a lift, so values above 1 darken the image — lower to ~1.3–1.5 for a faithful result
 - **Saturation** - Color saturation multiplier (default: 1.0). Higher = more vivid colors
 - **Red/Green/Blue gamma** - Per-channel gamma correction to balance colors
 
@@ -306,6 +307,13 @@ Starting with v2.0.0, new extractions use the **AMb3** binary format. The plugin
 **AMb3 header (96 bytes):** magic `AMb3`, version, flags (compression, delta, VFR, HDR), duration, total frames, base FPS, LED counts, compression algorithm, quality level, index offset, chunk count.
 
 **Chunk header (32 bytes):** timestamp, chunk type (keyframe/delta/RLE), compressed/uncompressed sizes, frame count, average brightness, flags.
+
+## Contributors
+
+This project wouldn't be where it is without its contributors. Thank you!
+
+- **[@gabrielprat](https://github.com/gabrielprat)** — creator and lead maintainer
+- **[@fabscav](https://github.com/fabscav)** — selectable extraction logic (linear-light averaging), per-device signal delay, AMb3 header branching for tone curves
 
 ## Support & Development
 
