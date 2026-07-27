@@ -4,6 +4,9 @@ All notable changes to the Jellyfin Ambilight Plugin will be documented in this 
 
 ## [Unreleased]
 
+### Added
+- **Per-device signal delay** — New signed `Signal Delay (ms)` setting on each WLED device mapping. Positive values delay the ambilight data (LEDs react later); negative values advance it (LEDs react earlier). Applied on top of the global sync lead to fine-tune sync issues on a specific device.
+
 ## [2.4.2] - 2026-07-22
 
 ### Fixed
