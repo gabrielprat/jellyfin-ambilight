@@ -10,6 +10,14 @@
     "versions": [
       {
         "version": "2.5.0",
+        "changelog": "# Release Notes - v2.5.0\n\n## Selectable Extraction Logic\n\nThe plugin now supports two per-zone color algorithms, selectable from the **Extraction logic** dropdown in settings:\n\n- **Sobel edge-weighted** (default) — The existing algorithm: Sobel edge detection + Gaussian center weighting with relative-luminance rescaling. Biases each zone toward high-contrast pixels and lifts dark zones, keeping the strip lively but making dark scenes read brighter than the picture.\n\n- **Linear-light averaging** — A plain unweighted mean of every pixel in the zone, taken in linear light via sRGB→linear lookup tables. A dark zone averages dark, and a black frame produces black LEDs. This more closely matches the behavior of HyperHDR and other ambilight software.\n\n### Tone curve automatically follows extraction method\n\nThe player now reads the extraction method from the AMb3 file header and applies the correct tone curve:\n- Linear-light files apply the user's gamma directly (`pow(x, gamma)`) and skip the mean-luminance pass.\n- Edge-weighted, AMb2, and older files keep the existing scene-adaptive lift.\n\n**No config change needed** — already-extracted files benefit without re-extraction.\n\n### Migration notes\n\n- Switching extraction method **requires re-extracting** existing items; previously extracted files are not converted.\n- The `AmbilightGamma` default of **2.2 will appear dark** for linear-light files (since gamma is applied directly instead of as a lift). Lower it to ~1.3-1.5 for a more picture-faithful result.\n\n## Per-Device Signal Delay\n\nA new signed **Signal Delay (ms)** setting on each WLED device mapping lets you fine-tune sync on a per-controller basis:\n- **Positive** values delay the ambilight data (LEDs react later).\n- **Negative** values advance it (LEDs react earlier).\n- The offset is applied on top of the global sync lead, so it works consistently across initial frame selection, seeks, and reported position.\n\n## Extraction Manager\n\nThe extraction table now includes a **Logic** column showing which extraction method produced each binary. The status API also exposes `ExtractionLogic` in its responses.\n",
+        "targetAbi": "10.10.0.0",
+        "sourceUrl": "https://github.com/gabrielprat/jellyfin-ambilight/releases/download/v2.5.0/jellyfin-plugin-ambilight_2.5.0.zip",
+        "checksum": "EB56CA496521199B2C178F42B825A2BF",
+        "timestamp": "2026-07-27T13:36:20Z"
+      },
+      {
+        "version": "2.5.0",
         "changelog": "See release notes at: https://github.com/gabrielprat/jellyfin-ambilight/releases/tag/v2.5.0",
         "targetAbi": "10.10.0.0",
         "sourceUrl": "https://github.com/gabrielprat/jellyfin-ambilight/releases/download/v2.5.0/jellyfin-plugin-ambilight_2.5.0.zip",
