@@ -139,6 +139,7 @@ Controls how and when the plugin processes videos:
 
 - **Top/Bottom/Left/Right LED counts** - Default LED strip layout used when creating binary files (default: 89/89/49/49)
 - **Extraction logic** - How each LED zone's color is derived from the picture. "Sobel edge-weighted" (default) biases each zone toward high-contrast pixels and rescales by relative luminance, keeping the strip lively but making dark scenes read brighter than the picture. "Linear-light averaging" takes a plain mean of every pixel in the zone in linear light, so dark zones average dark and black frames produce black LEDs. **Note:** With this method, the Base gamma is applied directly (exponents > 1 darken), so the default 2.2 may appear too dark — lower it to ~1.3–1.5 for a picture-faithful result. Changing this requires re-extracting existing items.
+
 - **Ambilight data folder** - Where to store extracted `.bin` files (default: `/data/ambilight`)
 
 The extracted data can be automatically scaled to match different LED layouts during playback (configured per device mapping below).
