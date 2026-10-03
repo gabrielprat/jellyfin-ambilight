@@ -2,6 +2,11 @@
 
 All notable changes to the Jellyfin Ambilight Plugin will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- Added support to reverse the layout of the LEDs. This can help if installation is in counterclockwise
+
 ## [2.5.0] - 2026-07-27
 
 ### Added
