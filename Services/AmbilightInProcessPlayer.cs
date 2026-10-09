@@ -489,6 +489,7 @@ public sealed class AmbilightInProcessPlayer : IDisposable
             int inputPosition = mapping.InputPosition;
             int gapLength = mapping.GapLength;
             int gapPosition = mapping.GapPosition;
+            bool reversed = mapping.Reversed;
 
             int rotLeds = totalTgt > 0 ? Math.Abs(inputPosition) % totalTgt : 0;
 
@@ -764,9 +765,13 @@ public sealed class AmbilightInProcessPlayer : IDisposable
                 }
 
                 byte[] frameToSend = outFrame;
+                if (reversed)
+                {
+                    frameToSend = ReverseLedFrame(frameToSend, totalTgt, bytesPerLed);
+                }
                 if (rotLeds > 0)
                 {
-                    frameToSend = RotateLedFrame(outFrame, rotLeds, totalTgt, bytesPerLed);
+                    frameToSend = RotateLedFrame(frameToSend, rotLeds, totalTgt, bytesPerLed);
                 }
 
                 if (gapLength > 0)
@@ -852,6 +857,17 @@ public sealed class AmbilightInProcessPlayer : IDisposable
         }
 
         return rotated;
+    }
+
+    private static byte[] ReverseLedFrame(byte[] frame, int totalLeds, int bytesPerLed)
+    {
+        var reversed = new byte[frame.Length];
+        for (int i = 0; i < totalLeds; i++)
+        {
+            Buffer.BlockCopy(frame, (totalLeds - 1 - i) * bytesPerLed,
+                             reversed, i * bytesPerLed, bytesPerLed);
+        }
+        return reversed;
     }
 
     /// <summary>

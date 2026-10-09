@@ -114,5 +114,7 @@ namespace Jellyfin.Plugin.Ambilight
         /// Applied on top of the global sync lead to correct per-device sync issues.
         /// </summary>
         public int SignalDelayMs { get; set; } = 0;
+
+        public bool Reversed { get; set; } = false;
     }
 }
