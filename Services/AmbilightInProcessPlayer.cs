@@ -279,13 +279,14 @@ public sealed class AmbilightInProcessPlayer : IDisposable
 
                                 if (lastKeyframe != null)
                                 {
+                                    // DecodeDelta expects the changed_count prefix as well as the entries.
                                     var full = Amb3Format.DecodeDelta(
                                         lastKeyframe,
-                                        uncompressed.AsSpan(dataOffset, deltaLen),
+                                        uncompressed.AsSpan(dataOffset - 2, deltaLen + 2),
                                         bytesPerLed);
                                     timestampsUs.Add(ts);
                                     frames.Add(full);
-                                    lastKeyframe = full;
+                                    // All deltas reference the last keyframe, not the previous delta.
                                 }
                                 dataOffset += deltaLen;
                             }
