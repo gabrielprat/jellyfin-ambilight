@@ -8,7 +8,15 @@ C# / .NET 8 plugin for Jellyfin that drives WLED LED strips with edge-detected v
 dotnet clean --configuration Release 2>&1 && dotnet restore && dotnet build --no-restore --configuration Release
 ```
 
-No test suite, no linter, no formatter, no typecheck beyond what the compiler provides. CI runs exactly the two commands above.
+CI restores dependencies, builds the plugin, and runs the playback regression checks. There is no linter or formatter, and no typecheck beyond what the compiler provides.
+
+Run the playback regression checks with:
+
+```bash
+dotnet run --project tests/PlaybackRegression/PlaybackRegression.csproj --configuration Release
+```
+
+These checks play generated AMb3 files through the real player and verify RGB packets on loopback. They require UDP port 19446 on 127.0.0.1 to be available; no Jellyfin server or WLED hardware is needed.
 
 ## Architecture (non-obvious facts)
 
@@ -60,4 +68,4 @@ After any significant code change, always run these to verify nothing is broken:
 dotnet restore && dotnet build --no-restore --configuration Release
 ```
 
-There is no test suite, linter, or formatter. A clean build with 0 warnings and 0 errors is the verification gate. If the build fails, fix before committing.
+A clean build with 0 warnings and 0 errors is the verification gate. For playback changes, also run the regression checks above. If either fails, fix before committing.

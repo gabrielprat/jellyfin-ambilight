@@ -23,6 +23,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="tests/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Use Jellyfin 10.10.* packages, but do not ship their runtimes -->
     <PackageReference Include="Jellyfin.Model" Version="10.10.*" PrivateAssets="All" />
     <PackageReference Include="Jellyfin.Controller" Version="10.10.*" PrivateAssets="All" />

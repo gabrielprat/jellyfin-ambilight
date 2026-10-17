@@ -25,6 +25,9 @@ jobs:
     
     - name: Build
       run: dotnet build --no-restore --configuration Release
+
+    - name: Check playback regressions
+      run: dotnet run --project tests/PlaybackRegression/PlaybackRegression.csproj --configuration Release
     
     - name: Create release package
       if: github.event_name == 'release'
