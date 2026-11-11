@@ -20,6 +20,20 @@
     let statusCheckInterval = null;
     let buttonCheckInterval = null;
 
+    /**
+     * Headers for /Ambilight calls: the API requires the signed-in user's Jellyfin token.
+     */
+    function apiHeaders() {
+        const headers = { 'Content-Type': 'application/json' };
+        const token = window.ApiClient && typeof window.ApiClient.accessToken === 'function'
+            ? window.ApiClient.accessToken()
+            : null;
+        if (token) {
+            headers['Authorization'] = 'MediaBrowser Token="' + token + '"';
+        }
+        return headers;
+    }
+
     function notify(message) {
         if (typeof require === 'function') {
             try {
@@ -46,9 +60,7 @@
             
             const response = await fetch(url, {
                 method: 'GET',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: apiHeaders(),
                 credentials: 'include'
             });
 
@@ -96,9 +108,7 @@
             
             const response = await fetch(url, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: apiHeaders(),
                 credentials: 'include'
             });
 

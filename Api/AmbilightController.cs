@@ -28,9 +28,12 @@ namespace Jellyfin.Plugin.Ambilight.Api;
 
 /// <summary>
 /// Ambilight API controller for configuration and control.
+/// Every endpoint needs a signed-in Jellyfin user; anything that changes state
+/// (configuration, extraction, deleting data) is restricted to administrators.
 /// </summary>
 [ApiController]
 [Route("Ambilight")]
+[Authorize]
 public class AmbilightController : ControllerBase
 {
     private ILibraryManager? GetLibraryManager()
@@ -50,6 +53,7 @@ public class AmbilightController : ControllerBase
     /// </summary>
     /// <returns>The plugin configuration.</returns>
     [HttpGet("Configuration")]
+    [Authorize(Policy = "RequiresElevation")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public ActionResult<PluginConfiguration> GetConfiguration()
     {
@@ -68,6 +72,7 @@ public class AmbilightController : ControllerBase
     /// <param name="configuration">The new configuration.</param>
     /// <returns>No content.</returns>
     [HttpPost("Configuration")]
+    [Authorize(Policy = "RequiresElevation")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public ActionResult UpdateConfiguration([FromBody, Required] PluginConfiguration configuration)
@@ -303,6 +308,7 @@ public class AmbilightController : ControllerBase
     /// </summary>
     /// <returns>Result with task status.</returns>
     [HttpPost("ExtractAllPending")]
+    [Authorize(Policy = "RequiresElevation")]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public ActionResult<AmbilightExtractAllResponse> ExtractAllPending()
@@ -359,6 +365,7 @@ public class AmbilightController : ControllerBase
     /// <param name="itemId">The item ID.</param>
     /// <returns>Extraction result.</returns>
     [HttpPost("Extract/{itemId}")]
+    [Authorize(Policy = "RequiresElevation")]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public ActionResult<AmbilightExtractResponse> ExtractItem([FromRoute, Required] string itemId)
@@ -420,6 +427,7 @@ public class AmbilightController : ControllerBase
     /// <param name="itemId">The item ID.</param>
     /// <returns>Result.</returns>
     [HttpPost("Extract/{itemId}/Cancel")]
+    [Authorize(Policy = "RequiresElevation")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -472,6 +480,7 @@ public class AmbilightController : ControllerBase
     /// </summary>
     /// <param name="itemId">The item ID.</param>
     [HttpDelete("Binary/{itemId}")]
+    [Authorize(Policy = "RequiresElevation")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public ActionResult DeleteBinary([FromRoute, Required] string itemId)
