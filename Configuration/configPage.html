@@ -299,6 +299,14 @@ the Free Software Foundation, either version 3 of the License, or
             </div>
         </div>
         <script type="text/javascript">
+            // The /Ambilight API requires an admin session: send the current Jellyfin token.
+            function ambFetch(url, opts) {
+                opts = opts || {};
+                opts.headers = Object.assign({}, opts.headers || {}, {
+                    'Authorization': 'MediaBrowser Token="' + ApiClient.accessToken() + '"'
+                });
+                return fetch(ApiClient.getUrl(url.replace(/^\//, '')), opts);
+            }
             var AmbilightConfig = {
                 pluginUniqueId: 'b3f6b4c7-0a3d-4bd4-a7e3-c8d5a0a1e3f0',
                 currentConfig: null
@@ -924,7 +932,7 @@ the Free Software Foundation, either version 3 of the License, or
                     
                     try {
                         const videoIds = allVideos.map(function(v) { return v.Id; });
-                        const response = await fetch('/Ambilight/Status/Batch', {
+                        const response = await ambFetch('/Ambilight/Status/Batch', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             credentials: 'include',
@@ -1570,7 +1578,7 @@ the Free Software Foundation, either version 3 of the License, or
                     button.textContent = 'Queuing...';
 
                     var extractUrl = '/Ambilight/Extract/' + itemId;
-                    const response = await fetch(extractUrl, {
+                    const response = await ambFetch(extractUrl, {
                         method: 'POST',
                         credentials: 'include'
                     });
@@ -1609,7 +1617,7 @@ the Free Software Foundation, either version 3 of the License, or
                     button.textContent = 'Stopping...';
 
                     var cancelUrl = '/Ambilight/Extract/' + itemId + '/Cancel';
-                    const response = await fetch(cancelUrl, {
+                    const response = await ambFetch(cancelUrl, {
                         method: 'POST',
                         credentials: 'include'
                     });
@@ -1643,7 +1651,7 @@ the Free Software Foundation, either version 3 of the License, or
                     button.textContent = 'Deleting...';
 
                     var deleteUrl = '/Ambilight/Binary/' + itemId;
-                    const response = await fetch(deleteUrl, {
+                    const response = await ambFetch(deleteUrl, {
                         method: 'DELETE',
                         credentials: 'include'
                     });
@@ -1678,7 +1686,7 @@ the Free Software Foundation, either version 3 of the License, or
 
                 try {
                     // Call the server-side batch extraction endpoint
-                    const response = await fetch('/Ambilight/ExtractAllPending', {
+                    const response = await ambFetch('/Ambilight/ExtractAllPending', {
                         method: 'POST',
                         credentials: 'include'
                     });
@@ -1726,7 +1734,7 @@ the Free Software Foundation, either version 3 of the License, or
                 console.log('[Ambilight] Polling progress for', extractingVideoIds.length, 'videos');
                 
                 try {
-                    const response = await fetch('/Ambilight/Status/Batch', {
+                    const response = await ambFetch('/Ambilight/Status/Batch', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         credentials: 'include',
