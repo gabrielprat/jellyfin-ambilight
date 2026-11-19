@@ -4,6 +4,9 @@ All notable changes to the Jellyfin Ambilight Plugin will be documented in this 
 
 ## [Unreleased]
 
+### Fixed
+- **LEDs out of sync with the picture by a different amount on every playback** — The player runs its own clock from the position reported when playback starts, and only re-syncs on a seek larger than 1.5 s. A start-up offset of a few hundred ms (file loading, client buffering) was therefore never corrected and changed from one playback to the next, so the per-device signal delay could not be tuned to a stable value. The player now compares the client's progress reports with its own clock and, once three consecutive reports agree on an offset of 50 ms or more, applies a one-off clock shift (no smoothing reset, no visible jump). Reports are ignored while paused and for a few seconds after a resume, because some clients report extrapolated positions then. Clients that round positions to whole seconds never trigger a correction. With `Debug` enabled every comparison is logged as `Clock sync`.
+
 ### Added
 - Added support to reverse the layout of the LEDs. This can help if installation is in counterclockwise
 

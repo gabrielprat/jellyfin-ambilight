@@ -47,6 +47,28 @@ public sealed class AmbilightInProcessPlayer : IDisposable
     private bool _isPaused;
     private double? _pendingSeekSeconds;
 
+    // Gentle clock correction. The player runs its own clock from the position reported when
+    // playback starts, so a small start-up offset (file loading, client buffering) would otherwise
+    // stay forever below the 1.5 s seek threshold. PlaybackService feeds the client's reported
+    // position to ReportClientPosition, which only corrects when several consecutive reports agree.
+    private const int DriftSampleCount = 3;          // consecutive reports that must agree
+    private const double DriftMaxSpread = 0.08;      // seconds; larger spread = noisy reports, do nothing
+    private const double DriftMinCorrection = 0.05;  // seconds; below this the offset is left alone
+    private double _pendingClockShiftSeconds;
+    // Player clock anchor: video position the clock was aiming at, and when that was sampled.
+    private double _clockAnchorSeconds = double.NaN;
+    private long _clockAnchorTicks;
+    private readonly Queue<double> _driftSamples = new();
+    private int _driftIgnoreReports;
+    // After a pause the client reports extrapolated positions for a few seconds before reporting
+    // real ones again, so reports are ignored for a while after a resume (see ReportClientPosition).
+    private bool _resumeResyncPending;
+    private long _resumeSettleUntilTicks;
+    private const long ResumeSettleTicks = 45_000_000; // 4.5 s
+    private long _pausedAtTicks;
+    private const double StaleAnchorSeconds = 0.3;       // clock not refreshed by the loop for this long = unreliable
+    private const long AnchorAfterPauseTicks = 1_500_000; // 150 ms: the loop must have refreshed the clock after a pause
+
     // Position of the frame currently being sent, in seconds from the start of the item.
     // Written by RunAsync each iteration, read by PlaybackService to tell a real seek apart
     // from ordinary playback progress. Long-backed because double has no volatile overload.
@@ -101,6 +123,16 @@ public sealed class AmbilightInProcessPlayer : IDisposable
             _playTask = null;
             // Drop the stale position so a restarted session is not compared against the old one.
             Interlocked.Exchange(ref _positionBits, BitConverter.DoubleToInt64Bits(double.NaN));
+            lock (_stateLock)
+            {
+                _clockAnchorSeconds = double.NaN;
+                _pendingClockShiftSeconds = 0.0;
+                _driftSamples.Clear();
+                _driftIgnoreReports = 0;
+                _resumeResyncPending = false;
+                _resumeSettleUntilTicks = 0;
+                _pausedAtTicks = 0;
+            }
         }
     }
 
@@ -128,8 +160,141 @@ public sealed class AmbilightInProcessPlayer : IDisposable
         lock (_stateLock)
         {
             _pendingSeekSeconds = seconds;
+            _driftSamples.Clear();
+            _driftIgnoreReports = 1;
+            // A seek rebases the clock on the client position, and the client reports real
+            // positions again after it.
+            _resumeResyncPending = false;
+            _resumeSettleUntilTicks = 0;
         }
     }
+
+    private void PublishClock(double positionSeconds)
+    {
+        lock (_stateLock)
+        {
+            _clockAnchorSeconds = positionSeconds;
+            _clockAnchorTicks = DateTime.UtcNow.Ticks;
+        }
+    }
+
+    /// <summary>
+    /// Called for every progress report whose position is within seek tolerance. Compares the
+    /// client position to the player clock and applies a one-off clock shift (positive = LEDs
+    /// react earlier, without resetting the smoothing state) once <see cref="DriftSampleCount"/>
+    /// consecutive reports agree on an offset larger than <see cref="DriftMinCorrection"/>.
+    /// Clients that round positions to whole seconds produce reports that disagree with each
+    /// other, so they are never corrected. Reports are ignored while paused, while the clock has
+    /// not been refreshed since a pause, and for a few seconds after a resume.
+    /// </summary>
+    public void ReportClientPosition(double clientSeconds, bool paused)
+    {
+        double playerSeconds;
+        double anchorAgeSeconds;
+        bool refreshedAfterPause;
+        lock (_stateLock)
+        {
+            if (double.IsNaN(_clockAnchorSeconds))
+            {
+                return;
+            }
+
+            var nowTicks = DateTime.UtcNow.Ticks;
+            anchorAgeSeconds = (nowTicks - _clockAnchorTicks) / (double)TimeSpan.TicksPerSecond;
+            playerSeconds = _clockAnchorSeconds + anchorAgeSeconds;
+            refreshedAfterPause = _pausedAtTicks == 0 || _clockAnchorTicks > _pausedAtTicks + AnchorAfterPauseTicks;
+        }
+
+        var diff = clientSeconds - playerSeconds; // positive = LEDs are behind the picture
+        double? correction = null;
+        string note;
+
+        lock (_stateLock)
+        {
+            if (paused)
+            {
+                // The loop does not refresh the clock while paused.
+                _driftSamples.Clear();
+                _resumeResyncPending = true;
+                _pausedAtTicks = DateTime.UtcNow.Ticks;
+                note = "paused, ignored";
+            }
+            else if (anchorAgeSeconds > StaleAnchorSeconds || !refreshedAfterPause)
+            {
+                // First report right after a resume, before the loop has woken up and refreshed
+                // the clock: the extrapolated position is meaningless.
+                _driftSamples.Clear();
+                note = "clock not refreshed yet (just resumed), ignored";
+            }
+            else if (_driftIgnoreReports > 0)
+            {
+                _driftIgnoreReports--;
+                _driftSamples.Clear();
+                note = "ignored (settling after a correction or seek)";
+            }
+            else if (_resumeResyncPending || DateTime.UtcNow.Ticks < _resumeSettleUntilTicks)
+            {
+                // Right after a resume the client reports positions that are extrapolated from the
+                // paused position (exact +1 s steps) for a few seconds, then jumps to the real
+                // position (observed with Jellyfin for Android TV 0.20.0). Using them would pull
+                // the clock the wrong way, so wait them out. The player itself resumes within a
+                // few hundred ms of the right place, so little is lost.
+                if (_resumeResyncPending)
+                {
+                    _resumeResyncPending = false;
+                    _resumeSettleUntilTicks = DateTime.UtcNow.Ticks + ResumeSettleTicks;
+                }
+
+                _driftSamples.Clear();
+                note = "settling after a resume (client position not reliable yet), ignored";
+            }
+            else
+            {
+                _driftSamples.Enqueue(diff);
+                while (_driftSamples.Count > DriftSampleCount)
+                {
+                    _driftSamples.Dequeue();
+                }
+
+                note = $"collecting {_driftSamples.Count}/{DriftSampleCount}";
+                if (_driftSamples.Count == DriftSampleCount)
+                {
+                    var sorted = _driftSamples.OrderBy(x => x).ToArray();
+                    var spread = sorted[^1] - sorted[0];
+                    var median = sorted[sorted.Length / 2];
+                    if (spread > DriftMaxSpread)
+                    {
+                        note = $"reports disagree (spread {spread * 1000:F0} ms), no correction";
+                    }
+                    else if (Math.Abs(median) >= DriftMinCorrection)
+                    {
+                        correction = median;
+                        _pendingClockShiftSeconds += median;
+                        _driftSamples.Clear();
+                        _driftIgnoreReports = 1;
+                        note = $"CORRECTING clock by {Ms(median):+0;-0;0} ms";
+                    }
+                    else
+                    {
+                        note = $"within tolerance (median {Ms(median):+0;-0;0} ms)";
+                    }
+                }
+            }
+        }
+
+        if (Config.Debug || correction.HasValue)
+        {
+            _logger.LogInformation(
+                "[Ambilight] Clock sync: client {Client:F3}s, player {Player:F3}s, offset {Diff:+0;-0;0} ms - {Note}",
+                clientSeconds,
+                playerSeconds,
+                Ms(diff),
+                note);
+        }
+    }
+
+    // Whole milliseconds; an int avoids the "-0" a tiny negative double would print.
+    private static int Ms(double seconds) => (int)Math.Round(seconds * 1000.0);
 
     private async Task RunAsync(string sessionId, string binPath, DeviceMapping mapping, double startSeconds, CancellationToken cancellationToken)
     {
@@ -520,11 +685,20 @@ public sealed class AmbilightInProcessPlayer : IDisposable
                 // Apply pending seek / pause state from PlaybackService
                 bool pausedNow;
                 double? seekSec;
+                double clockShiftSec;
                 lock (_stateLock)
                 {
                     pausedNow = _isPaused;
                     seekSec = _pendingSeekSeconds;
                     _pendingSeekSeconds = null;
+                    clockShiftSec = _pendingClockShiftSeconds;
+                    _pendingClockShiftSeconds = 0.0;
+                }
+
+                // A seek rebases the clock anyway, so a pending shift only matters without one.
+                if (!seekSec.HasValue && clockShiftSec != 0.0)
+                {
+                    elapsedBase += TimeSpan.FromSeconds(clockShiftSec);
                 }
 
                 if (seekSec.HasValue)
@@ -610,14 +784,28 @@ public sealed class AmbilightInProcessPlayer : IDisposable
                 ulong baseTs = startFrame < timestampsUs.Count ? timestampsUs[startFrame] : 0;
                 var frameTargetUs = frameTs > baseTs ? frameTs - baseTs : 0UL;
                 var elapsed = elapsedBase + (DateTime.UtcNow - startInstant);
-                ulong elapsedUs = (ulong)(elapsed.TotalSeconds * 1_000_000.0);
+
+                // Publish the player clock (the video position it is aiming at, independent of
+                // which frame was sent last: identical frames share a timestamp, so the last sent
+                // frame can lag the clock by seconds in static scenes).
+                PublishClock((baseTs / 1_000_000.0) - baseSyncLead + elapsed.TotalSeconds);
+
+                // A negative shift larger than the elapsed time must not wrap around in the cast.
+                ulong elapsedUs = (ulong)(Math.Max(0.0, elapsed.TotalSeconds) * 1_000_000.0);
                 if (elapsedUs < frameTargetUs)
                 {
                     var sleepUs = frameTargetUs - elapsedUs;
                     var sleepMs = (int)Math.Max(0, sleepUs / 1000UL);
                     if (sleepMs > 0)
                     {
-                        await Task.Delay(sleepMs, cancellationToken).ConfigureAwait(false);
+                        // Sleep in short slices so a pending seek / pause / clock shift is picked
+                        // up quickly instead of after a long static scene.
+                        const int MaxSleepSliceMs = 50;
+                        await Task.Delay(Math.Min(sleepMs, MaxSleepSliceMs), cancellationToken).ConfigureAwait(false);
+                        if (sleepMs > MaxSleepSliceMs)
+                        {
+                            continue;
+                        }
                     }
                 }
 
