@@ -256,6 +256,12 @@ public class AmbilightPlaybackService
                 }
                 inProc.Seek(currSeconds);
             }
+            else
+            {
+                // Within seek tolerance: let the player check for (and gently remove) a small
+                // constant offset, e.g. from start-up latency.
+                inProc.ReportClientPosition(currSeconds, paused);
+            }
         }
     }
 
