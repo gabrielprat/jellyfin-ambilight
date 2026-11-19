@@ -21,6 +21,7 @@ namespace Jellyfin.Plugin.Ambilight
         public bool ExtractNewlyAddedItems { get; set; } = true;
         public int MaxConcurrentExtractions { get; set; } = 1;
         public string HardwareAcceleration { get; set; } = "auto"; // "auto", "none", "vaapi", "qsv", "cuda", "videotoolbox"
+    public string HdrToneMapping { get; set; } = "auto"; // "auto" (tone-map HDR10/HLG sources to SDR before extraction), "off"
         
         // WLED Device Mappings
         public string DeviceMatchField { get; set; } = "DeviceName";

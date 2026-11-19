@@ -179,7 +179,104 @@ public sealed class AmbilightInProcessExtractor
         return fallbackFps;
     }
 
-    private string BuildFfmpegArguments(string videoPath)
+    private string ResolveFfprobePath()
+    {
+        if (Path.IsPathRooted(_ffmpegPath))
+        {
+            var dir = Path.GetDirectoryName(_ffmpegPath);
+            return Path.Combine(dir ?? "/", "ffprobe");
+        }
+
+        return "ffprobe";
+    }
+
+    /// <summary>
+    /// Runs a short-lived helper process and returns its stdout, or null on any failure.
+    /// </summary>
+    private async Task<string?> RunToolForOutput(string fileName, string arguments, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var proc = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = fileName,
+                    Arguments = arguments,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                }
+            };
+
+            proc.Start();
+            var stdoutTask = proc.StandardOutput.ReadToEndAsync(cancellationToken);
+            _ = proc.StandardError.ReadToEndAsync(cancellationToken);
+            await proc.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            var output = await stdoutTask.ConfigureAwait(false);
+            return proc.ExitCode == 0 ? output : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Returns true when the first video stream uses an HDR transfer function (HDR10/HDR10+/Dolby Vision
+    /// profile 8 = PQ "smpte2084", or HLG "arib-std-b67").
+    /// </summary>
+    private async Task<bool> IsHdrSource(string videoPath, CancellationToken cancellationToken)
+    {
+        var output = await RunToolForOutput(
+            ResolveFfprobePath(),
+            $"-v error -select_streams v:0 -show_entries stream=color_transfer -of default=noprint_wrappers=1:nokey=1 \"{videoPath}\"",
+            cancellationToken).ConfigureAwait(false);
+
+        var transfer = output?.Trim().ToLowerInvariant();
+        return transfer == "smpte2084" || transfer == "arib-std-b67";
+    }
+
+    /// <summary>
+    /// True when the ffmpeg build provides the zscale (libzimg) and tonemap filters.
+    /// </summary>
+    private async Task<bool> SupportsToneMapping(CancellationToken cancellationToken)
+    {
+        var output = await RunToolForOutput(_ffmpegPath, "-hide_banner -filters", cancellationToken).ConfigureAwait(false);
+        return output != null
+            && output.Contains(" zscale ", StringComparison.Ordinal)
+            && output.Contains(" tonemap ", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Decides whether HDR-to-SDR tone mapping should be applied for this video.
+    /// Without it, PQ/HLG code values are read as if they were SDR, which yields pale, desaturated,
+    /// bluish colors.
+    /// </summary>
+    private async Task<bool> ShouldToneMap(string videoPath, CancellationToken cancellationToken)
+    {
+        if (string.Equals(Config.HdrToneMapping, "off", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!await IsHdrSource(videoPath, cancellationToken).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        if (!await SupportsToneMapping(cancellationToken).ConfigureAwait(false))
+        {
+            _logger.LogWarning("[Ambilight] Extractor: HDR source detected but ffmpeg lacks the zscale/tonemap filters; colors will look washed out. Install jellyfin-ffmpeg to fix this.");
+            return false;
+        }
+
+        _logger.LogInformation("[Ambilight] Extractor: HDR source detected, applying HDR-to-SDR tone mapping.");
+        return true;
+    }
+
+    private string BuildFfmpegArguments(string videoPath, bool toneMap)
     {
         var hwaccel = Config.HardwareAcceleration ?? "auto";
         var baseArgs = "-hide_banner -loglevel error";
@@ -201,7 +298,15 @@ public sealed class AmbilightInProcessExtractor
         // ffmpeg will automatically transfer frames to system memory for filtering
         // Keep pixel format explicit in the filter graph to avoid driver-dependent
         // color conversion quirks before writing rawvideo bytes.
-        string filterChain = $"scale={ExtractWidth}:{ExtractHeight},format=rgb24";
+        string filterChain = $"scale={ExtractWidth}:{ExtractHeight}";
+        if (toneMap)
+        {
+            // HDR (PQ/HLG, BT.2020) -> SDR (BT.709): linearize, convert primaries, tone map in linear
+            // light, then re-encode with the BT.709 transfer. The scale runs first so the expensive
+            // float conversion only touches the small 320x180 frame.
+            filterChain += ",zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv";
+        }
+        filterChain += ",format=rgb24";
         
         return $"{baseArgs} {hwaccelArgs} -i \"{videoPath}\" -vf {filterChain} -pix_fmt rgb24 -f rawvideo pipe:1".Trim();
     }
@@ -301,7 +406,8 @@ public sealed class AmbilightInProcessExtractor
             }
 
             // Build ffmpeg arguments with hardware acceleration
-            string ffmpegArgs = BuildFfmpegArguments(videoPath);
+            bool toneMap = await ShouldToneMap(videoPath, cancellationToken).ConfigureAwait(false);
+            string ffmpegArgs = BuildFfmpegArguments(videoPath, toneMap);
             
             // Start ffmpeg to produce a scaled RGB24 raw video stream.
             var ffmpeg = new Process
