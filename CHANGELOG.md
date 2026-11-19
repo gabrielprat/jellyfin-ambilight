@@ -5,6 +5,7 @@ All notable changes to the Jellyfin Ambilight Plugin will be documented in this 
 ## [Unreleased]
 
 ### Added
+- **HDR tone mapping during extraction** — HDR10 / HLG sources (PQ `smpte2084` or `arib-std-b67` transfer, detected with ffprobe) are now converted to SDR BT.709 (`zscale` + `tonemap=hable`) before colors are extracted. Previously the raw PQ/HLG code values were treated as SDR, which produced pale, desaturated, bluish LED colors on HDR films. New `HDR tone mapping` setting (`Auto` / `Off`); falls back to the old behavior with a warning if ffmpeg lacks `zscale`/`tonemap`. Existing HDR extractions must be re-extracted to benefit.
 - Added support to reverse the layout of the LEDs. This can help if installation is in counterclockwise
 
 ## [2.5.0] - 2026-07-27

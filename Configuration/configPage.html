@@ -122,6 +122,15 @@ the Free Software Foundation, either version 3 of the License, or
                         <div class="fieldDescription">How each LED zone's color is derived from the picture. "Sobel edge-weighted extraction" (default) biases each zone toward high-contrast pixels and rescales zones by relative brightness, which keeps the strip lively but makes dark scenes read brighter than the picture. "Linear-light averaging" takes a plain mean of every pixel in the zone in linear light, so a dark zone averages dark and a black frame produces black LEDs. Changing this requires re-extracting existing items — previously extracted files are not converted.</div>
                     </div>
 
+                    <div class="selectContainer" style="margin-top: 1.5em;">
+                        <label class="selectLabel" for="HdrToneMapping">HDR tone mapping</label>
+                        <select is="emby-select" id="HdrToneMapping" class="emby-select-withcolor emby-select">
+                            <option value="auto">Auto (tone-map HDR sources)</option>
+                            <option value="off">Off</option>
+                        </select>
+                        <div class="fieldDescription">HDR10 / HLG / Dolby Vision (profile 8) videos are converted to SDR before colors are extracted. Without this, HDR code values are read as SDR and the LEDs look pale, desaturated and bluish. Requires an ffmpeg build with the zscale and tonemap filters (jellyfin-ffmpeg has them). Changing this requires re-extracting existing items.</div>
+                    </div>
+
                     <div class="inputContainer" style="margin-top: 1.5em;">
                         <label class="inputLabel inputLabelUnfocused" for="AmbilightDataFolder">Ambilight data folder</label>
                         <div style="display: flex; gap: 0.5em; align-items: center;">
@@ -323,6 +332,7 @@ the Free Software Foundation, either version 3 of the License, or
                         document.querySelector('#AmbilightLeftLedCount').value = config.AmbilightLeftLedCount;
                         document.querySelector('#AmbilightRightLedCount').value = config.AmbilightRightLedCount;
                         document.querySelector('#AmbilightExtractionMethod').value = config.AmbilightExtractionMethod || 'edge_weighted';
+        document.querySelector('#HdrToneMapping').value = config.HdrToneMapping || 'auto';
                         document.querySelector('#AmbilightGamma').value = config.AmbilightGamma;
                         document.querySelector('#AmbilightSaturation').value = config.AmbilightSaturation;
 
@@ -359,6 +369,7 @@ the Free Software Foundation, either version 3 of the License, or
                     config.AmbilightLeftLedCount = document.querySelector('#AmbilightLeftLedCount').value;
                     config.AmbilightRightLedCount = document.querySelector('#AmbilightRightLedCount').value;
                     config.AmbilightExtractionMethod = document.querySelector('#AmbilightExtractionMethod').value || 'edge_weighted';
+        config.HdrToneMapping = document.querySelector('#HdrToneMapping').value || 'auto';
                     config.AmbilightGamma = document.querySelector('#AmbilightGamma').value;
                     config.AmbilightSaturation = document.querySelector('#AmbilightSaturation').value;
 
