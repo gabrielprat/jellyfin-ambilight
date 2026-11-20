@@ -4,6 +4,9 @@ All notable changes to the Jellyfin Ambilight Plugin will be documented in this 
 
 ## [Unreleased]
 
+### Fixed
+- **Flash at every scene cut when smoothing is enabled** — After a reset of the smoothing state (start of playback, seek, scene cut) the accumulator was seeded with the raw frame colors, while the colors it blends toward have saturation and the output gamma applied. With a linear-light extraction (output gamma = configured gamma, 2.2 by default) that made the strip start much brighter and paler than the color it converges to and fade to it over the smoothing time, a white-ish flash that grew with the smoothing value. The accumulator is now seeded with the processed colors of the first frame. Smoothing of gradual changes is unchanged.
+
 ### Added
 - Added support to reverse the layout of the LEDs. This can help if installation is in counterclockwise
 

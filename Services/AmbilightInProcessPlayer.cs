@@ -697,21 +697,15 @@ public sealed class AmbilightInProcessPlayer : IDisposable
                     ? 1.0f  // no EMA: use the current frame only
                     : 1.0f - (float)Math.Exp(-frameDtS / smoothTau);
 
-                if (emaAcc == null)
-                {
-                    emaAcc = new float[totalTgt * bytesPerLed];
-                    for (int t = 0; t < totalTgt; t++)
-                    {
-                        int srcIdx = totalTgt > 0 ? (t * totalSrc) / totalTgt : 0;
-                        int sb = srcIdx * bytesPerLed;
-                        for (int b = 0; b < bytesPerLed; b++)
-                        {
-                            emaAcc[t * bytesPerLed + b] = raw[sb + b];
-                        }
-                    }
-                }
+                // After a start, a seek or a scene cut there is no history to blend with, so the
+                // accumulator takes this frame's own processed colors below. Seeding it with the raw
+                // colors instead made it start far from what it converges to (much brighter with a
+                // gamma above 1, as with linear-light extraction) and produced a flash decaying over
+                // the smoothing time after every reset.
+                bool blendWithHistory = emaAcc != null;
+                emaAcc ??= new float[totalTgt * bytesPerLed];
 
-                var acc = emaAcc!;
+                var acc = emaAcc;
                 var outFrame = new byte[totalTgt * bytesPerLed];
 
                 float sUser = ClampF(saturation, 0.0f, 5.0f);
@@ -748,9 +742,18 @@ public sealed class AmbilightInProcessPlayer : IDisposable
                     float bF = bG * 255.0f;
 
                     int @base = t * bytesPerLed;
-                    acc[@base] = acc[@base] * (1.0f - k) + rF * k;
-                    acc[@base + 1] = acc[@base + 1] * (1.0f - k) + gF * k;
-                    acc[@base + 2] = acc[@base + 2] * (1.0f - k) + bF * k;
+                    if (blendWithHistory)
+                    {
+                        acc[@base] = acc[@base] * (1.0f - k) + rF * k;
+                        acc[@base + 1] = acc[@base + 1] * (1.0f - k) + gF * k;
+                        acc[@base + 2] = acc[@base + 2] * (1.0f - k) + bF * k;
+                    }
+                    else
+                    {
+                        acc[@base] = rF;
+                        acc[@base + 1] = gF;
+                        acc[@base + 2] = bF;
+                    }
 
                     float rOut = MathF.Round(acc[@base]);
                     float gOut = MathF.Round(acc[@base + 1]);
